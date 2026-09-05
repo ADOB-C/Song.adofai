@@ -4,14 +4,20 @@ CFLAGS  += -std=c11 -Wall -Wextra -D_POSIX_C_SOURCE=200809L
 LDLIBS   = -lm
 
 BIN     = adofai-audio
+SRCS    = util.c chart.c pcm.c codec.c commands.c main.c
+OBJS    = $(SRCS:.c=.o)
+HDRS    = util.h chart.h pcm.h codec.h cli.h
 
 all: $(BIN)
 
-$(BIN): adofai_audio.c
-	$(CC) $(CFLAGS) -o $@ $< $(LDLIBS)
+$(BIN): $(OBJS)
+	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LDLIBS)
+
+%.o: %.c $(HDRS)
+	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
-	rm -f $(BIN)
+	rm -f $(BIN) $(OBJS)
 
 test: $(BIN)
 	./$(BIN) self-test
