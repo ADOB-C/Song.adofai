@@ -1,2 +1,5 @@
+/build/
+*.o
+/adofai-audio
 __pycache__/
 *.pyc
