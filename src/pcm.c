@@ -53,7 +53,7 @@ Pcm pcm_read_wav(const char *path)
         memcpy(p.s, data, p.n * 2);
         p.rate = rate;
     }
-    munmap((void *)m.p, m.n);
+    map_close(&m);
     return p; /* empty -> caller falls back to ffmpeg */
 }
 

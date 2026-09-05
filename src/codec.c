@@ -96,11 +96,20 @@ Audio audio_decode_map(const Map *m)
 
 Audio audio_decode(const char *path)
 {
-    Map m = map_file(path);
+    Map m = map_open(path);
     Audio a = audio_decode_map(&m);
-    munmap((void *)m.p, m.n);
+    map_close(&m);
     return a;
 }
+
+/* counted writers: keep FILE* API, no ftello (xz cookie streams are not seekable) */
+static size_t wput(FILE *f, const void *b, size_t n)
+{
+    if (n) fwrite(b, 1, n, f);
+    return n;
+}
+static size_t wstr(FILE *f, const char *s) { return wput(f, s, strlen(s)); }
+static size_t wch(FILE *f, int c) { fputc(c, f); return 1; }
 
 size_t encode_core(FILE *f, const int16_t *s, size_t n, int rate,
                            const char *title, const char *artist,
@@ -126,32 +135,37 @@ size_t encode_core(FILE *f, const int16_t *s, size_t n, int rate,
     esc_json(artist, eartist, sizeof eartist);
     volstr(s[0], v0, sizeof v0);
 
+    size_t nw = 0;                       /* bytes written (== plaintext size) */
+
     /* angleData: one single dense line of n zeros */
-    fputs("{\r\n\t\"angleData\": [", f);
+    nw += wstr(f, "{\r\n\t\"angleData\": [");
     {
         const size_t K = 4096;
         char *seg = malloc(K * 2);
+        if (!seg) die("out of memory");
         for (size_t i = 0; i < K; i++) {
             seg[i * 2] = '0';
             seg[i * 2 + 1] = (i + 1 < K) ? ',' : '\0';
         }
         size_t full = n / K, first = 1;
         for (size_t i = 0; i < full; i++) {
-            if (!first) fputc(',', f);
-            fwrite(seg, 1, K * 2 - 1, f);
+            if (!first) nw += wch(f, ',');
+            nw += wput(f, seg, K * 2 - 1);
             first = 0;
         }
         size_t rem = n % K;
         if (rem) {
-            if (!first) fputc(',', f);
+            if (!first) nw += wch(f, ',');
             for (size_t i = 0; i < rem; i++) {
-                fputc('0', f);
-                if (i + 1 < rem) fputc(',', f);
+                nw += wch(f, '0');
+                if (i + 1 < rem) nw += wch(f, ',');
             }
         }
         free(seg);
     }
-    fprintf(f,
+
+    char setb[4096];
+    int sl = snprintf(setb, sizeof setb,
             "],\r\n"
             "\t\"settings\": {\r\n"
             "\t\t\"version\": 13,\r\n"
@@ -165,6 +179,8 @@ size_t encode_core(FILE *f, const int16_t *s, size_t n, int rate,
             "\t},\r\n"
             "\t\"actions\": [\r\n",
             rate * 60, eartist, etitle, AUTHOR_JSON, v0);
+    if (sl < 0 || (size_t)sl >= sizeof setb) die("settings block overflow");
+    nw += wput(f, setb, (size_t)sl);
 
     {
         char *buf = malloc(1 << 20);
@@ -180,20 +196,19 @@ size_t encode_core(FILE *f, const int16_t *s, size_t n, int rate,
                               "\"hitsoundVolume\": %s },\r\n",
                               (long long)efloor[i], vs);
             if (bl + (size_t)ln + 1 > (1 << 20)) {
-                fwrite(buf, 1, bl, f);
+                nw += wput(f, buf, bl);
                 bl = 0;
             }
             memcpy(buf + bl, line, (size_t)ln);
             bl += (size_t)ln;
         }
-        fwrite(buf, 1, bl, f);
+        nw += wput(f, buf, bl);
         free(buf);
     }
-    fputs("\t]\r\n}\r\n", f);
-    size_t bytes = (size_t)ftello(f);
+    nw += wstr(f, "\t]\r\n}\r\n");
     free(efloor);
     free(esamp);
     if (events_out) *events_out = ne;
-    return bytes;
+    return nw;
 }
 

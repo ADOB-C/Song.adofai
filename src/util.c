@@ -16,6 +16,7 @@
 #include <unistd.h>
 
 #include "util.h"
+#include "xz.h"
 
 void die(const char *fmt, ...)
 {
@@ -43,10 +44,27 @@ Map map_file(const char *path)
     struct stat st;
     if (fstat(fd, &st) != 0) die("fstat %s: %s", path, strerror(errno));
     m.n = (size_t)st.st_size;
+    m.src = m.n;
     m.p = mmap(NULL, m.n, PROT_READ, MAP_PRIVATE, fd, 0);
     if (m.p == MAP_FAILED) die("mmap %s: %s", path, strerror(errno));
     close(fd);
     return m;
+}
+
+Map map_open(const char *path)
+{
+    if (xz_sniff(path)) return xz_map(path);
+    return map_file(path);
+}
+
+void map_close(Map *m)
+{
+    if (!m || !m->p) return;
+    if (m->owned) free((void *)m->p);
+    else munmap((void *)m->p, m->n);
+    m->p = NULL;
+    m->n = m->src = 0;
+    m->owned = 0;
 }
 
 const unsigned char *findb(const unsigned char *hay, size_t n,

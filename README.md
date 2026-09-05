@@ -50,7 +50,30 @@ ffplay -nodisp -autoexit listen.wav
 ./build/adofai-audio --help | --version | self-test
 ```
 
-依赖：POSIX（mmap）+ C11；`ffmpeg`/`ffprobe` 仅非 WAV 输入与容器标签时使用。
+### xz 压缩（省磁盘）
+
+谱面是 ~1.4 GB/4 分钟的 JSON 文本，可用 xz 直接压到几十 MB：
+
+```sh
+# 输出路径以 .xz 结尾 → 边编码边压缩（默认 level 6，--xz-level 0-9 / 9e 可调）
+./build/adofai-audio encode in.wav out.adofai.xz
+# decode / verify / info 按内容自动识别 .xz，直接读压缩谱面（扩展名无关）
+./build/adofai-audio decode out.adofai.xz back.wav
+./build/adofai-audio verify out.adofai.xz in.wav
+./build/adofai-audio info out.adofai.xz
+```
+
+产物为标准 `.xz`（CRC64，可与 `xz` 命令行互通）；编码仍在内存流式压缩、
+不落明文。实测（近似最坏情况：全采样随机变化）：4 分钟谱面 text ~1.4 GB →
+level 3 ~72 MB、**level 6 ~63 MB**（默认）、9e ~62 MB；音乐通常更小。读 `.xz`
+需整流解压进内存，谱面超大时请留意内存。
+
+依赖：POSIX（mmap）+ C11 + **liblzma**（`brew install xz` / Debian `liblzma-dev`；
+`make LZMA_CFLAGS=... LZMA_LIBS=...` 可指向自定义安装）；`ffmpeg`/`ffprobe`
+仅非 WAV 输入与容器标签时使用。
+
+第三方致谢：xz 压缩使用 **XZ Utils (liblzma)** <https://tukaani.org/xz/>，采用
+BSD Zero Clause (0BSD) 许可证，与本项目 MIT 许可兼容。
 
 ## 性能（Apple Silicon M2 实测，解码纯读已有文件、不落盘）
 
@@ -67,7 +90,7 @@ ffplay -nodisp -autoexit listen.wav
 
 ```
 src/
-├── *.c             实现（util/chart/pcm/codec/commands/main）
+├── *.c             实现（util/chart/pcm/codec/xz/commands/main）
 └── include/*.h     公共头文件（编译时 -Isrc/include）
 build/             编译产物（二进制 + .o，已被 .gitignore 排除）
 Makefile / LICENSE / README.md

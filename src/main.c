@@ -25,11 +25,13 @@ void usage(FILE *f)
             "usage: adofai-audio <command> [options]\n"
             "\n"
             "commands:\n"
-            "  encode INPUT [OUT]   audio -> .adofai (v2 change-event layout)\n"
+            "  encode INPUT [OUT]   audio -> .adofai (v2 change-event layout);\n"
+            "                       OUT ending in .xz writes an xz-compressed chart\n"
             "      --artist NAME    override artist (default: ffprobe tags)\n"
             "      --title NAME     override song title\n"
             "      --out-dir DIR    directory for auto-named output\n"
-            "  decode CHART OUT     .adofai -> mono s16 WAV\n"
+            "      --xz-level L     xz preset 0-9 (optionally 9e); default 6\n"
+            "  decode CHART OUT     .adofai or .xz -> mono s16 WAV\n"
             "      --gain F         output gain (1.0 = bit-exact)\n"
             "  verify CHART REF     bit-exact diff against reference audio\n"
             "  info CHART           print artist/song/author + audio info\n"
@@ -41,6 +43,7 @@ void usage(FILE *f)
             "\n"
             "format: bpm = sampleRate*60; hitsoundVolume = int16/655.36;\n"
             "events only at sample changes; angleData is one dense zero line.\n"
+            "decode/verify/info detect .xz by content and decompress on the fly.\n"
             "ffmpeg/ffprobe are needed only for non-WAV input or tags.\n",
             VERSION);
 }
@@ -50,7 +53,7 @@ int main(int argc, char **argv)
     const char *cmd = NULL;
     const char *pos[4] = {0};
     int npos = 0;
-    const char *artist = NULL, *title = NULL, *outdir = NULL;
+    const char *artist = NULL, *title = NULL, *outdir = NULL, *xzopt = NULL;
     double gain = 1.0;
 
     for (int i = 1; i < argc; i++) {
@@ -67,6 +70,8 @@ int main(int argc, char **argv)
             title = argv[++i];
         } else if (strcmp(a, "--out-dir") == 0 && i + 1 < argc) {
             outdir = argv[++i];
+        } else if (strcmp(a, "--xz-level") == 0 && i + 1 < argc) {
+            xzopt = argv[++i];
         } else if (strcmp(a, "--gain") == 0 && i + 1 < argc) {
             gain = atof(argv[++i]);
         } else if (a[0] == '-' && a[1]) {
@@ -88,7 +93,7 @@ int main(int argc, char **argv)
     }
     if (strcmp(cmd, "encode") == 0) {
         if (npos < 1 || npos > 2) { usage(stderr); return 2; }
-        return encode_cmd(pos[0], npos == 2 ? pos[1] : NULL, outdir, title, artist);
+        return encode_cmd(pos[0], npos == 2 ? pos[1] : NULL, outdir, title, artist, xzopt);
     }
     if (strcmp(cmd, "decode") == 0) {
         if (npos != 2) { usage(stderr); return 2; }

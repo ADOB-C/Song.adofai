@@ -19,6 +19,7 @@
 #include "cli.h"
 #include "chart.h"
 #include "pcm.h"
+#include "xz.h"
 
 int decode_cmd(const char *chart, const char *out, double gain)
 {
@@ -66,7 +67,7 @@ int verify_cmd(const char *chart, const char *ref)
 
 int info_cmd(const char *chart)
 {
-    Map m = map_file(chart);
+    Map m = map_open(chart);
     Meta meta;
     meta_parse(&m, &meta);
     long entries = angle_entries(&m);
@@ -83,10 +84,14 @@ int info_cmd(const char *chart)
     printf("author: %s\n", meta.author[0] ? meta.author : "(none)");
     printf("events: %zu  angle entries: %ld\n", ev.n, entries);
     printf("sample rate (bpm/60): %.1f Hz  duration: %.3fs\n", rate, total / rate);
-    printf("size: %.3f GB\n", m.n / 1e9);
+    if (m.owned)
+        printf("size: %.3f GB text (%.1f MB .xz on disk)\n",
+               m.n / 1e9, (double)m.src / 1e6);
+    else
+        printf("size: %.3f GB\n", m.n / 1e9);
     free(ev.floor);
     free(ev.vol);
-    munmap((void *)m.p, m.n);
+    map_close(&m);
     return 0;
 }
 
@@ -110,7 +115,8 @@ void sanitize_name(const char *in, char *out, size_t outsz)
 }
 
 int encode_cmd(const char *input, const char *outpath, const char *outdir,
-                      const char *title_opt, const char *artist_opt)
+                      const char *title_opt, const char *artist_opt,
+                      const char *xzopt)
 {
     double t0 = now_s();
     Pcm p = pcm_load(input);
@@ -159,15 +165,35 @@ int encode_cmd(const char *input, const char *outpath, const char *outdir,
             snprintf(out, sizeof out, "%s", name);
     }
 
-    FILE *f = fopen(out, "wb");
-    if (!f) die("cannot write %s: %s", out, strerror(errno));
+    size_t l = strlen(out);
+    int compressed = l >= 3 && strcasecmp(out + l - 3, ".xz") == 0;
+    FILE *f;
+    if (compressed) {
+        f = xz_open(out, xz_parse_preset(xzopt));
+    } else {
+        f = fopen(out, "wb");
+        if (!f) die("cannot write %s: %s", out, strerror(errno));
+    }
     size_t ne = 0;
     size_t bytes = encode_core(f, p.s, p.n, p.rate, title, artist, &ne);
-    fclose(f);
+    if (fclose(f) != 0) die("write error on %s", out);
 
-    printf("encoded %zu samples (%.1f kHz, %.1fs) -> %s (%.2f GB) in %.1fs\n",
-           p.n, p.rate / 1000.0, (double)p.n / p.rate, out,
-           (double)bytes / 1e9, now_s() - t0);
+    double tel = now_s() - t0;
+    if (compressed) {
+        long long disk = -1;
+        struct stat st;
+        if (stat(out, &st) == 0) disk = (long long)st.st_size;
+        printf("encoded %zu samples (%.1f kHz, %.1fs) -> %s\n"
+               "  text %.2f GB -> xz %.2f MB on disk (%.0fx) in %.1fs\n",
+               p.n, p.rate / 1000.0, (double)p.n / p.rate, out,
+               (double)bytes / 1e9,
+               disk < 0 ? 0.0 : (double)disk / 1e6,
+               disk > 0 ? (double)bytes / (double)disk : 0.0, tel);
+    } else {
+        printf("encoded %zu samples (%.1f kHz, %.1fs) -> %s (%.2f GB) in %.1fs\n",
+               p.n, p.rate / 1000.0, (double)p.n / p.rate, out,
+               (double)bytes / 1e9, tel);
+    }
     size_t max_events = p.n > 1 ? p.n - 1 : 0;
     printf("  events: %zu (max %zu; saved %zu, %.1f%%)\n",
            ne, max_events, max_events - ne,
@@ -198,7 +224,7 @@ int selftest_cmd(void)
     encode_core(mf, tone, (size_t)n, rate, "Tone Test", "Artist", &ne);
     fclose(mf);
 
-    Map m = { (const unsigned char *)cbuf, csize };
+    Map m = { (const unsigned char *)cbuf, csize, 0, 0 };
     Audio a = audio_decode_map(&m);
     int rc;
     if (a.total != (size_t)n) {
