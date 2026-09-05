@@ -1,4 +1,4 @@
-# Music.adofai — ADOFAI 音频编解码器（C，MIT）
+# Song.adofai — ADOFAI 音频编解码器（C，MIT）
 
 把音频无损编码成 `.adofai` 谱面（"audio-as-chart"），并可从谱面逐样本还原
 回 WAV。**每个音频采样 = 一层**，`BPM/60 = 采样率`。
@@ -14,7 +14,7 @@
 - 采样值：`hitsoundVolume = int16 / 655.36`（dyadic，float64/文本精确；0 写 `0`）
   → `decode(encode(x)) == x` 逐样本零误差。
 - 内嵌元数据：`settings.artist / song / author`
-  （author 固定 `Music.adofai (https://github.com/CHT-1192/Music.adofai)`）。
+  （author 固定 `Song.adofai (https://github.com/CHT-1192/Song.adofai)`）。
 - 解码兼容旧版/第三方全事件谱（自动判别：settings 音量 ≤50 = v2；=100 = 旧版）。
 
 ## 版本（1.0.0 之前）
@@ -34,7 +34,7 @@ make test            # 纯内存自检（不写盘）
 
 # 音频 → 谱面（省略输出路径时按 --title/--artist 自动命名）
 ./build/adofai-audio encode in.m4a out.adofai --title "Unity" --artist "TheFatRat"
-./build/adofai-audio encode in.wav --out-dir ~/Documents/Charts/Music.adofai
+./build/adofai-audio encode in.wav --out-dir ~/Documents/Charts/Song.adofai
 
 # 谱面 → WAV（默认 bit-exact；--gain 0.5 适合直接听）
 ./build/adofai-audio decode chart.adofai back.wav
@@ -80,4 +80,4 @@ Makefile / LICENSE / README.md
 
 - `Unity.wav_rate.adofai`（第三方 1.5 GB）：解码与官方原声不同——响段被响度/
   饱和处理损坏（crest 5 dB、样本级去相关），损伤在其源文件，与格式无关。
-- 本工具生成的谱（`~/Documents/Charts/Music.adofai/`）与源音频 bit-exact。
+- 本工具生成的谱（`~/Documents/Charts/Song.adofai/`）与源音频 bit-exact。

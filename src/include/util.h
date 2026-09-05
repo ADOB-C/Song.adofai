@@ -4,8 +4,8 @@
 #include <stdio.h>
 
 #define VERSION "0.3.0"
-#define AUTHOR "Music.adofai (https://github.com/CHT-1192/Music.adofai)"
-#define AUTHOR_JSON "\"Music.adofai (https://github.com/CHT-1192/Music.adofai)\""
+#define AUTHOR "Song.adofai (https://github.com/CHT-1192/Song.adofai)"
+#define AUTHOR_JSON "\"Song.adofai (https://github.com/CHT-1192/Song.adofai)\""
 #define MAX_PATH_LEN 4096
 
 typedef struct { const unsigned char *p; size_t n; } Map;
