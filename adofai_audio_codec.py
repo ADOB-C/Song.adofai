@@ -6,29 +6,27 @@ every audio sample becomes one tile, the track's BPM is chosen so that
 BPM / 60 == the audio sample rate, and each sample value is stored in a
 per-tile SetHitsound event's `hitsoundVolume` field as  sample / 655.36.
 
-  sample rate (Hz)  |  BPM            |  samples / second
-  ------------------|-----------------|------------------
-  44100             |  2646000        |  44100   (default, matches Unity.wav_rate.adofai)
+Layout (v2, space-optimized; still plain ADOFAI JSON):
+  * settings.hitsoundVolume = first sample (no event needed for floor 1);
+    ADOFAI SetHitsound volume persists forward, so events are only written at
+    sample-to-sample *changes* (silence runs, leading/trailing zeros and exact
+    repeats cost no events at all).
+  * angleData stays all zeros (direction is meaningless for audio) but is
+    written densely ("0,0,..."), a few thousand per line.
+  * trailing silence needs no events: after the final change to 0 the decoder
+    fills zeros up to the tile count implied by angleData.
 
-Format facts (verified bit-exact against 1.5 GB community charts):
-  * hitsoundVolume = int16_sample / 655.36  is an EXACT binary64 (dyadic), so
-    decode(encode(x)) == x for every sample; roundtrip diff is zero.
-  * angleData is all zeros (direction is meaningless for audio); one
-    SetHitsound ("Kick", gameSound "Hitsound") per sample, floor 1..N.
-
-Input handling: WAV files are read with the stdlib `wave` module; any other
-audio container (m4a/webm/opus/mp3/flac/...) is decoded with ffmpeg
-(downmixed to mono, original sample rate preserved). Title/artist metadata
-is read with ffprobe when available and embedded into the chart's settings,
-and used to auto-name the output "Artist - Title.adofai".
-
-Only the Python standard library is required; ffmpeg/ffprobe are optional
-(needed only for non-WAV input or for auto-naming from container tags).
+Fidelity facts (verified bit-exact on 1.5 GB charts):
+  * hitsoundVolume = int16_sample / 655.36 is an EXACT binary64 (dyadic);
+    decode(encode(x)) == x for every sample, roundtrip diff zero.
+  * decoding older full-event charts also works: sample count is
+    max(angleData_len - 1, last event floor).
 """
 from __future__ import annotations
 
 import argparse
 import array
+import io
 import math
 import mmap
 import os
@@ -38,10 +36,9 @@ import subprocess
 import sys
 import tempfile
 import time
-import io
 import wave
 
-__version__ = "1.1.0"
+__version__ = "2.0.0"
 
 AUTHOR = "Music.adofai (https://github.com/CHT-1192/Music.adofai)"
 
@@ -51,16 +48,34 @@ _VOL_RE = re.compile(
 )
 
 
+def _fmt(v: float) -> str:
+    """Short decimal formatting; exact for dyadic int16/655.36 values."""
+    if v == 0.0:
+        return "0"          # 0.0 -> 0
+    if v == int(v):
+        return str(int(v))
+    return repr(v)
+
+
+def _vol(x: int) -> str:
+    return _fmt(x / 655.36)  # dyadic -> exact float64 roundtrip
+
+
 def _str_field(haystack: bytes, key: str) -> str | None:
     m = re.search(rb'"' + key.encode() + rb'"\s*:\s*"((?:[^"\\]|\\.)*)"', haystack)
-    if not m:
-        return None
-    return m.group(1).decode("utf-8", "replace")
+    return m.group(1).decode("utf-8", "replace") if m else None
 
 
-def _num_field(haystack: bytes, key: str) -> int | None:
-    m = re.search(rb'"' + key.encode() + rb'"\s*:\s*(\d+)', haystack)
-    return int(m.group(1)) if m else None
+def _num_field(haystack: bytes, key: str) -> float | None:
+    m = re.search(rb'"' + key.encode() + rb'"\s*:\s*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)', haystack)
+    return float(m.group(1)) if m else None
+
+
+def _settings_region(adofai_path: str) -> bytes:
+    with open(adofai_path, "rb") as f:
+        head = f.read(1 << 29)  # settings live near the top in our charts
+    si = head.find(b'"settings"')
+    return head[si : si + (1 << 20)] if si >= 0 else head
 
 
 # --------------------------------------------------------------------------
@@ -68,7 +83,6 @@ def _num_field(haystack: bytes, key: str) -> int | None:
 # --------------------------------------------------------------------------
 
 def read_tags(path: str) -> dict:
-    """Read container tags with ffprobe. Returns {} when unavailable."""
     ffprobe = shutil.which("ffprobe")
     if not ffprobe:
         return {}
@@ -116,7 +130,6 @@ def decode_pcm(path: str) -> tuple[array.array, int]:
                 a = array.array("h")
                 a.frombytes(w.readframes(w.getnframes()))
                 return a, rate
-        # non-conforming WAV: fall through to ffmpeg below
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         sys.exit(f"error: {path}: need a mono 16-bit WAV or ffmpeg to decode other formats")
@@ -144,11 +157,6 @@ def decode_pcm(path: str) -> tuple[array.array, int]:
 
 def encode_file(input_path: str, out_path: str | None, out_dir: str | None,
                 title: str | None, artist: str | None) -> int:
-    """Encode an audio file into the audio-as-chart format.
-
-    out_path None -> auto-named from metadata ("Artist - Title.adofai"),
-    placed in out_dir (default: current directory).
-    """
     s, rate = decode_pcm(input_path)
     n = len(s)
 
@@ -157,99 +165,170 @@ def encode_file(input_path: str, out_path: str | None, out_dir: str | None,
     artist = artist or tags.get("artist")
 
     if out_path is None:
-        d = out_dir or "."
-        name = auto_output_name(input_path, {"title": title, "artist": artist})
-        out_path = os.path.join(d, name)
-    os.makedirs(os.path.dirname(os.path.abspath(out_path)) or ".", exist_ok=True)
+        out_path = os.path.join(out_dir or ".", auto_output_name(input_path, {"title": title, "artist": artist}))
+
+    esc = lambda t: (t or "").replace("\\", "\\\\").replace('"', '\\"')
+
+    # events only at volume changes (ADOFAI SetHitsound volume persists forward)
+    events: list[tuple[int, int]] = []
+    prev = s[0]
+    for i in range(1, n):
+        if s[i] != prev:
+            events.append((i + 1, s[i]))  # floor i+1 <-> sample i
+            prev = s[i]
 
     bpm = rate * 60
 
-    def vol(x: int) -> str:
-        return repr(x / 655.36)  # dyadic -> exact float64 roundtrip
+    # folded angleData: dense runs of "0", a few thousand per line
+    line_buf: list[str] = []
+    chunk: list[str] = []
+    for _ in range(n):
+        chunk.append("0")
+        if len(chunk) >= 4000:
+            line_buf.append(",".join(chunk))
+            chunk = []
+    if chunk:
+        line_buf.append(",".join(chunk))
+    folded = ",\r\n".join(line_buf)
 
-    esc = lambda s_: (s_ or "").replace("\\", "\\\\").replace('"', '\\"')
-    head = (
-        '{\r\n\t"angleData": [\r\n'
-        + ",\r\n".join("0" for _ in range(n + 1))
-        + '\r\n\t],\r\n'
-        + '\t"settings": {\r\n'
-        + '\t\t"version": 13,\r\n'
-        + f'\t\t"bpm": {bpm},\r\n'
-        + f'\t\t"artist": "{esc(artist)}",\r\n'
-        + f'\t\t"song": "{esc(title)}",\r\n'
-        + f'\t\t"author": "{esc(AUTHOR)}",\r\n'
-        + '\t\t"hitsound": "Kick",\r\n'
-        + '\t\t"hitsoundVolume": 100,\r\n'
-        + '\t\t"offset": 0\r\n'
-        + '\t},\r\n'
-        + '\t"actions": [\r\n'
-    ).encode("utf-8")
-
+    settings = (
+        '\t"settings": {\r\n'
+        f'\t\t"version": 13,\r\n'
+        f'\t\t"bpm": {bpm},\r\n'
+        f'\t\t"artist": "{esc(artist)}",\r\n'
+        f'\t\t"song": "{esc(title)}",\r\n'
+        f'\t\t"author": "{esc(AUTHOR)}",\r\n'
+        '\t\t"hitsound": "Kick",\r\n'
+        f'\t\t"hitsoundVolume": {_vol(s[0])},\r\n'   # initial volume: no floor-1 event
+        '\t\t"offset": 0\r\n'
+        '\t},\r\n'
+        '\t"actions": [\r\n'
+    )
     line = '\t\t{{ "floor": {0}, "eventType": "SetHitsound", "gameSound": "Hitsound", "hitsound": "Kick", "hitsoundVolume": {1} }},\r\n'
 
     t0 = time.time()
     with open(out_path, "wb") as f:
-        f.write(head)
+        f.write(('{\r\n\t"angleData": [\r\n' + folded + '],\r\n' + settings).encode("utf-8"))
         buf: list[str] = []
-        for k in range(1, n + 1):  # floor k <-> sample k-1
-            buf.append(line.format(k, vol(s[k - 1])))
+        for floor, x in events:
+            buf.append(line.format(floor, _vol(x)))
             if len(buf) >= 5000:
                 f.write("".join(buf).encode("utf-8"))
                 buf = []
         if buf:
             f.write("".join(buf).encode("utf-8"))
         f.write(b"\t]\r\n}\r\n")
-    print(f"encoded {n} samples ({rate/1000:.1f} kHz, {n/rate:.1f}s) -> {out_path} "
-          f"({os.path.getsize(out_path)/1e9:.2f} GB) in {time.time()-t0:.0f}s")
+    size = os.path.getsize(out_path)
+    print(f"encoded {n} samples ({rate/1000:.1f} kHz, {n/rate:.1f}s) -> {out_path} ({size/1e9:.2f} GB) in {time.time()-t0:.0f}s")
+    print(f"  events: {len(events)} (max {n-1}; saved {n-1-len(events)}, {100.0*(n-1-len(events))/max(1,n-1):.1f}%)")
     if artist or title:
         print(f"  artist={artist or ''}  song={title or ''}  author={AUTHOR}")
     return n
 
 
 # --------------------------------------------------------------------------
-# decoding / verify / info
+# decoding
 # --------------------------------------------------------------------------
 
-def _read_samples(adofai_path: str) -> tuple[list[int], list[int]]:
+def _angle_entries(adofai_path: str) -> int:
+    """Count angleData array entries without a full JSON parse."""
+    with open(adofai_path, "rb") as f:
+        mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+        try:
+            ast = mm.find(b'"angleData"')
+            if ast < 0:
+                return 0
+            a0 = mm.find(b"[", ast)
+            end = mm.find(b'"settings"', a0)
+            if end < 0:
+                end = mm.find(b'"pathData"', a0)
+            seg = mm[a0:end if end > 0 else len(mm)]
+            close = seg.rfind(b"]")
+            seg = seg[:close] if close > 0 else seg
+            return seg.count(b",") + 1
+        finally:
+            mm.close()
+
+
+def _read_audio(adofai_path: str) -> tuple[array.array, int, float]:
+    """Decode an audio-as-chart into (samples_int16, sample_count, rate_hz).
+
+    Handles both v2 change-event layouts and older full-event charts.
+    Sample count = max(angleData_len - 1, last event floor).
+    """
+    vol0 = 0
+    hv: float | None = None
+    rate = 44100.0
     floors: list[int] = []
-    samples: list[int] = []
+    vols: list[float] = []
     with open(adofai_path, "rb") as f:
         mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
         t0 = time.time()
         try:
+            head = mm[: (1 << 29)]
+            si = head.find(b'"settings"')
+            if si >= 0:
+                region = head[si : si + (1 << 20)]
+                hv = _num_field(region, "hitsoundVolume")
+                if hv is not None:
+                    vol0 = int(round(hv * 655.36))
+                bpm = _num_field(region, "bpm")
+                if bpm:
+                    rate = bpm / 60.0
             for m in _VOL_RE.finditer(mm):
                 floors.append(int(m.group(1)))
-                x = int(round(float(m.group(2)) * 655.36))
-                samples.append(max(-32768, min(32767, x)))
+                vols.append(float(m.group(2)))
+            last_floor = floors[-1] if floors else 0
         finally:
             mm.close()
-    if not samples:
-        sys.exit(f"error: no SetHitsound events found in {adofai_path}")
-    print(f"read {len(samples)} samples in {time.time()-t0:.0f}s", file=sys.stderr)
-    return floors, samples
+    entries = _angle_entries(adofai_path)
+    # layout disambiguation:
+    #   v2 (this codec): settings.hitsoundVolume = first sample (|vol|<=50),
+    #     angleData has exactly one entry per sample
+    #   legacy/full-event charts: settings.hitsoundVolume = 100 (a dummy),
+    #     angleData has samples+1 entries
+    if hv is not None and abs(hv) <= 50.0:
+        n_samples = entries
+    else:
+        n_samples = entries - 1
+    total = max(n_samples, last_floor)
+    print(f"read {len(floors)} events, {total} samples in {time.time()-t0:.0f}s", file=sys.stderr)
+
+    # rebuild by persistent-volume segments (array multiply, no per-sample loop)
+    cur = max(-32768, min(32767, vol0))
+    out = array.array("h")
+    pos = 0
+    for floor, v in zip(floors, vols):
+        if floor - 1 > pos:
+            out.extend(array.array("h", [cur]) * (floor - 1 - pos))
+        cur = max(-32768, min(32767, int(round(v * 655.36))))
+        pos = max(pos, floor - 1)
+    if pos < total:
+        out.extend(array.array("h", [cur]) * (total - pos))
+    if len(out) > total:
+        del out[total:]
+    return out, total, rate
 
 
 def decode_chart(adofai_path: str, out_path: str, gain: float = 1.0) -> int:
-    _, samples = _read_samples(adofai_path)
+    out, total, rate = _read_audio(adofai_path)
     if gain != 1.0:
-        samples = [max(-32768, min(32767, int(round(x * gain)))) for x in samples]
-    out = array.array("h", samples)
+        g = array.array("h", (max(-32768, min(32767, int(round(x * gain)))) for x in out))
+        out = g
     with wave.open(out_path, "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
-        w.setframerate(44100)
+        w.setframerate(int(round(rate)))
         w.writeframes(out.tobytes())
-    print(f"decoded {len(out)} samples -> {out_path} ({os.path.getsize(out_path)/1e6:.1f} MB)")
+    print(f"decoded {len(out)} samples ({rate/1000:.1f} kHz, {total/rate:.1f}s) -> {out_path} ({os.path.getsize(out_path)/1e6:.1f} MB)")
     return len(out)
 
 
 def verify_chart(adofai_path: str, ref_path: str) -> int:
-    _, samples = _read_samples(adofai_path)
-    ref_pcm, ref_rate = decode_pcm(ref_path)
-    if ref_pcm.typecode != "h":
-        ref_pcm = array.array("h", ref_pcm)
-    if len(samples) != len(ref_pcm):
-        print(f"length mismatch: chart {len(samples)} vs ref {len(ref_pcm)}")
+    samples, total, _ = _read_audio(adofai_path)
+    ref_pcm, _ = decode_pcm(ref_path)
+    if len(samples) != len(ref_pcm) or total != len(ref_pcm):
+        print(f"length mismatch: chart {len(samples)} (total {total}) vs ref {len(ref_pcm)}")
         return 1
     mism = 0
     first = None
@@ -266,23 +345,19 @@ def verify_chart(adofai_path: str, ref_path: str) -> int:
 
 
 def chart_info(adofai_path: str) -> None:
-    floors, samples = _read_samples(adofai_path)
-    with open(adofai_path, "rb") as f:
-        mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
-        head = mm[: (1 << 29)]
-        si = head.find(b'"settings"')
-        region = head[si : si + (1 << 20)] if si >= 0 else b""
-        bpm = _num_field(region, "bpm")
-        artist = _str_field(region, "artist")
-        song = _str_field(region, "song")
-        author = _str_field(region, "author")
-        mm.close()
-    rate = bpm / 60 if bpm else 44100.0
+    _, total, rate = _read_audio(adofai_path)
+    region = _settings_region(adofai_path)
+    bpm = _num_field(region, "bpm")
+    artist = _str_field(region, "artist")
+    song = _str_field(region, "song")
+    author = _str_field(region, "author")
+    if bpm:
+        rate = bpm / 60.0
     print(f"artist: {artist or '(none)'}")
     print(f"song:   {song or '(none)'}")
     print(f"author: {author or '(none)'}")
-    print(f"floors: {floors[0]}..{floors[-1]}  samples: {len(samples)}")
-    print(f"sample rate (bpm/60): {rate} Hz  duration: {len(samples)/rate:.3f}s")
+    print(f"events: {_angle_entries(adofai_path)} angle entries")
+    print(f"sample rate (bpm/60): {rate} Hz  duration: {total/rate:.3f}s")
     print(f"size: {os.path.getsize(adofai_path)/1e9:.3f} GB")
 
 
@@ -308,7 +383,6 @@ def self_test() -> int:
         back = os.path.join(td, "back.wav")
         decode_chart(chart, back)
         rc = verify_chart(chart, wav)
-        info_rc = chart_info(chart) or 0
         if rc == 0:
             print("SELF-TEST PASSED")
             return 0
@@ -324,7 +398,7 @@ def main() -> int:
     )
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    p = sub.add_parser("encode", help="audio -> .adofai (WAV via stdlib; others via ffmpeg)")
+    p = sub.add_parser("encode", help="audio -> .adofai (change-event layout v2)")
     p.add_argument("input", help="audio file (wav/m4a/webm/opus/mp3/...)")
     p.add_argument("out", nargs="?", help="output path; default: auto-named from tags")
     p.add_argument("--out-dir", help="directory for auto-named output (default: cwd)")

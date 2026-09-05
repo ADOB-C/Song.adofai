@@ -5,19 +5,22 @@
 "apofaiautomaker"）用这种方式把整首歌塞进一个谱子：**每个音频采样 = 一层**，
 BPM/60 = 采样率。
 
-## 原理 / 格式规格
+## 原理 / 格式规格（v2 布局）
 
 - 输入：任意 ffmpeg 可解码的音频（wav/m4a/webm/opus/mp3/flac…）；
   纯 WAV（mono 16-bit）走标准库，其余自动经 ffmpeg 转单声道、保留原始采样率。
 - `settings.bpm = 采样率 × 60`（44.1 kHz → **2,646,000**，与 Unity.wav_rate 谱一致）。
-- 每层一条动作：`SetHitsound`（gameSound "Hitsound"，hitsound "Kick"），
-  floor 1..N 依次对应采样 0..N-1。
-- 采样值存放：`hitsoundVolume = int16 / 655.36`。
-  该映射是**二进制的精确 dyadic 小数**，float64 可无损表示
-  → `decode(encode(x)) == x`，往返逐样本零误差（已在 1.4 GB 谱面上验证）。
-- `angleData` 全 0（方向对音频无意义）。
+- `settings.hitsoundVolume` = 第一个采样的音量 → **floor 1 不需要事件**。
+- SetHitsound 音量在 ADOFAI 中向前持续生效 → **只在采样值变化处写事件**：
+  开头/结尾静音、重复值全部零成本。
+- 尾部静音无需事件：解码器按 angleData 推导的层数自动补零。
+- `angleData` 全 0 且**折行压缩**（每行数千个 `0`），JSON 依然合法。
+- 采样值存放：`hitsoundVolume = int16 / 655.36`（dyadic，float64 无损；0 写作 `0`）。
+  → `decode(encode(x)) == x` 逐样本零误差。
 - 生成的谱面内嵌元数据：`settings.artist` / `settings.song` / `settings.author`
   （author 固定署名 `Music.adofai (https://github.com/CHT-1192/Music.adofai)`）。
+- **解码兼容旧版**：通过 `settings.hitsoundVolume` 判别布局
+  （≤50 = v2 初始音量；100 = 旧版/第三方全事件谱），第三方 1.5 GB 谱验证通过。
 
 ## 用法
 
@@ -61,9 +64,10 @@ python3 adofai_audio_codec.py encode src.m4a --title "..." --artist "..."
 
 | 操作 | 耗时 |
 |---|---|
-| 编码 10,980,865 采样 → 1.4 GB JSON | ~2 分钟（写盘） |
+| v1 全事件编码（旧） | 1,515 MB / 曲（Unity 4:09） |
+| v2 变化点编码（新） | 1,471 MB / 曲（省 ~44 MB；静音/重复越多越省） |
 | 解码 1.4 GB JSON → WAV | ~15 秒 |
-| 往返校验 | 0 / 10,980,865 不匹配 |
+| 往返校验 | 0 / 千万级采样不匹配（v2/v1/第三方谱均通过） |
 
 ## 程序生成谱的存放约定
 
