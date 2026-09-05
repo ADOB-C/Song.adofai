@@ -11,8 +11,8 @@ Layout (v2, space-optimized; still plain ADOFAI JSON):
     ADOFAI SetHitsound volume persists forward, so events are only written at
     sample-to-sample *changes* (silence runs, leading/trailing zeros and exact
     repeats cost no events at all).
-  * angleData stays all zeros (direction is meaningless for audio) but is
-    written densely ("0,0,..."), a few thousand per line.
+  * angleData stays all zeros (direction is meaningless for audio) and is
+    written as one single dense line ("0,0,...") -- no per-entry newlines.
   * trailing silence needs no events: after the final change to 0 the decoder
     fills zeros up to the tile count implied by angleData.
 
@@ -179,18 +179,6 @@ def encode_file(input_path: str, out_path: str | None, out_dir: str | None,
 
     bpm = rate * 60
 
-    # folded angleData: dense runs of "0", a few thousand per line
-    line_buf: list[str] = []
-    chunk: list[str] = []
-    for _ in range(n):
-        chunk.append("0")
-        if len(chunk) >= 4000:
-            line_buf.append(",".join(chunk))
-            chunk = []
-    if chunk:
-        line_buf.append(",".join(chunk))
-    folded = ",\r\n".join(line_buf)
-
     settings = (
         '\t"settings": {\r\n'
         f'\t\t"version": 13,\r\n'
@@ -208,7 +196,18 @@ def encode_file(input_path: str, out_path: str | None, out_dir: str | None,
 
     t0 = time.time()
     with open(out_path, "wb") as f:
-        f.write(('{\r\n\t"angleData": [\r\n' + folded + '],\r\n' + settings).encode("utf-8"))
+        # angleData: one single line, zero newlines (they only cost bytes)
+        f.write(b'{\r\n\t"angleData": [')
+        chunk = []
+        for _ in range(n):
+            chunk.append("0")
+            if len(chunk) >= 4000:
+                f.write(",".join(chunk).encode("utf-8"))
+                f.write(b",")
+                chunk = []
+        if chunk:
+            f.write(",".join(chunk).encode("utf-8"))
+        f.write(('],\r\n' + settings).encode("utf-8"))
         buf: list[str] = []
         for floor, x in events:
             buf.append(line.format(floor, _vol(x)))

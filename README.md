@@ -14,7 +14,7 @@ BPM/60 = 采样率。
 - SetHitsound 音量在 ADOFAI 中向前持续生效 → **只在采样值变化处写事件**：
   开头/结尾静音、重复值全部零成本。
 - 尾部静音无需事件：解码器按 angleData 推导的层数自动补零。
-- `angleData` 全 0 且**折行压缩**（每行数千个 `0`），JSON 依然合法。
+- `angleData` 全 0 且**单行密排**（`0,0,…`，无换行），JSON 依然合法。
 - 采样值存放：`hitsoundVolume = int16 / 655.36`（dyadic，float64 无损；0 写作 `0`）。
   → `decode(encode(x)) == x` 逐样本零误差。
 - 生成的谱面内嵌元数据：`settings.artist` / `settings.song` / `settings.author`
