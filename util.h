@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#define VERSION "3.0.0"
+#define VERSION "0.3.0"
 #define AUTHOR "Music.adofai (https://github.com/CHT-1192/Music.adofai)"
 #define AUTHOR_JSON "\"Music.adofai (https://github.com/CHT-1192/Music.adofai)\""
 #define MAX_PATH_LEN 4096
