@@ -66,17 +66,11 @@ ffplay -nodisp -autoexit listen.wav
 ## 结构（多文件，单文件 ≤250 行）
 
 ```
-src/            源码（头文件同名放置）
-├── util.c/h      公共设施：die/now/mmap(Map)/findb/skip_ws/esc_json/版本与署名常量
-├── chart.c/h     .adofai 解析：settings 元数据、angleData 计数、SetHitsound 锚点扫描
-├── pcm.c/h       PCM I/O：WAV 读取、ffmpeg 回退、ffprobe 标签、WAV 写出
-├── codec.c/h     编解码核心：dyadic 文本格式化、音量持续重建、encode_core
-├── commands.c    CLI 子命令：encode/decode/verify/info/self-test
-├── main.c        CLI 入口：参数解析 + usage
-└── cli.h         子命令接口
-build/          编译产物（二进制 + .o，已被 .gitignore 排除，不入库）
-Makefile         make / make test / make install
-LICENSE / README.md
+src/
+├── *.c             实现（util/chart/pcm/codec/commands/main）
+└── include/*.h     公共头文件（编译时 -Isrc/include）
+build/             编译产物（二进制 + .o，已被 .gitignore 排除）
+Makefile / LICENSE / README.md
 ```
 
 解析器为锚点扫描（`SetHitsound` 定位 + 对象边界内取 floor/hitsoundVolume），
