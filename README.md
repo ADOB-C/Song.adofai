@@ -39,7 +39,9 @@ make test            # 纯内存自检（不写盘）
 # 谱面 → WAV（默认 bit-exact；--gain 0.5 适合直接听）
 ./build/adofai-audio decode chart.adofai back.wav
 ./build/adofai-audio decode chart.adofai listen.wav --gain 0.5
-ffplay -nodisp -autoexit listen.wav
+
+# 直接播放（明文或 .xz 均可，不写临时 WAV；ffplay 只是可选项）
+./build/adofai-audio play chart.adofai.xz --gain 0.5
 
 # 与参考音频逐样本比对
 ./build/adofai-audio verify chart.adofai source.m4a
@@ -57,8 +59,9 @@ ffplay -nodisp -autoexit listen.wav
 ```sh
 # 输出路径以 .xz 结尾 → 边编码边压缩（默认 level 6，--xz-level 0-9 / 9e 可调）
 ./build/adofai-audio encode in.wav out.adofai.xz
-# decode / verify / info 按内容自动识别 .xz，直接读压缩谱面（扩展名无关）
+# decode / play / verify / info 按内容自动识别 .xz，直接读压缩谱面（扩展名无关）
 ./build/adofai-audio decode out.adofai.xz back.wav
+./build/adofai-audio play out.adofai.xz
 ./build/adofai-audio verify out.adofai.xz in.wav
 ./build/adofai-audio info out.adofai.xz
 ```
@@ -69,11 +72,15 @@ level 3 ~72 MB、**level 6 ~63 MB**（默认）、9e ~62 MB；音乐通常更小
 需整流解压进内存，谱面超大时请留意内存。
 
 依赖：POSIX（mmap）+ C11 + **liblzma**（`brew install xz` / Debian `liblzma-dev`；
-`make LZMA_CFLAGS=... LZMA_LIBS=...` 可指向自定义安装）；`ffmpeg`/`ffprobe`
-仅非 WAV 输入与容器标签时使用。
+`make LZMA_CFLAGS=... LZMA_LIBS=...` 可指向自定义安装）；`play` 用随附的
+**miniaudio**（`third_party/miniaudio.h`，无需安装，macOS 需 CoreAudio 系框架，
+Linux 需 ALSA 等后端库）；`ffmpeg`/`ffprobe` 仅非 WAV 输入与容器标签时使用。
 
-第三方致谢：xz 压缩使用 **XZ Utils (liblzma)** <https://tukaani.org/xz/>，采用
-BSD Zero Clause (0BSD) 许可证，与本项目 MIT 许可兼容。
+第三方致谢：
+- xz 压缩使用 **XZ Utils (liblzma)** <https://tukaani.org/xz/>，采用 BSD Zero
+  Clause (0BSD) 许可证，与本项目 MIT 许可兼容。
+- 播放使用 **miniaudio** <https://miniaud.io/>（v0.11.25，随附于
+  `third_party/miniaudio.h`），public domain / MIT-0 双许可。
 
 ## 性能（Apple Silicon M2 实测，解码纯读已有文件、不落盘）
 
@@ -90,8 +97,9 @@ BSD Zero Clause (0BSD) 许可证，与本项目 MIT 许可兼容。
 
 ```
 src/
-├── *.c             实现（util/chart/pcm/codec/xz/commands/main）
+├── *.c             实现（util/chart/pcm/codec/xz/commands/play/main）
 └── include/*.h     公共头文件（编译时 -Isrc/include）
+third_party/       随附第三方单头库（miniaudio.h）
 build/             编译产物（二进制 + .o，已被 .gitignore 排除）
 Makefile / LICENSE / README.md
 ```

@@ -33,6 +33,8 @@ void usage(FILE *f)
             "      --xz-level L     xz preset 0-9 (optionally 9e); default 6\n"
             "  decode CHART OUT     .adofai or .xz -> mono s16 WAV\n"
             "      --gain F         output gain (1.0 = bit-exact)\n"
+            "  play CHART           play .adofai / .xz on the default audio device\n"
+            "      --gain F         playback gain (1.0 = original)\n"
             "  verify CHART REF     bit-exact diff against reference audio\n"
             "  info CHART           print artist/song/author + audio info\n"
             "  self-test            roundtrip a synthetic tone\n"
@@ -43,7 +45,7 @@ void usage(FILE *f)
             "\n"
             "format: bpm = sampleRate*60; hitsoundVolume = int16/655.36;\n"
             "events only at sample changes; angleData is one dense zero line.\n"
-            "decode/verify/info detect .xz by content and decompress on the fly.\n"
+            "decode/play/verify/info detect .xz by content and decompress on the fly.\n"
             "ffmpeg/ffprobe are needed only for non-WAV input or tags.\n",
             VERSION);
 }
@@ -98,6 +100,10 @@ int main(int argc, char **argv)
     if (strcmp(cmd, "decode") == 0) {
         if (npos != 2) { usage(stderr); return 2; }
         return decode_cmd(pos[0], pos[1], gain);
+    }
+    if (strcmp(cmd, "play") == 0) {
+        if (npos != 1) { usage(stderr); return 2; }
+        return play_cmd(pos[0], gain);
     }
     if (strcmp(cmd, "verify") == 0) {
         if (npos != 2) { usage(stderr); return 2; }
