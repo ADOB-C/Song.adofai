@@ -1,6 +1,8 @@
 CC      ?= cc
 CFLAGS  ?= -O2
-CFLAGS  += -std=c11 -Wall -Wextra -D_POSIX_C_SOURCE=200809L -Isrc/include -Ithird_party
+# -iquote: quoted includes see src/include (e.g. "zstd.h" = ours) while
+# <zstd.h> from #include <...> still resolves to the real libzstd header.
+CFLAGS  += -std=c11 -Wall -Wextra -D_POSIX_C_SOURCE=200809L -iquote src/include -Ithird_party
 LDLIBS   = -lm
 
 # liblzma (xz) / libzstd — override *_CFLAGS/*_LIBS for custom installs
@@ -28,7 +30,7 @@ BIN      = build/adofai-audio
 SRCS     = src/util.c src/chart.c src/pcm.c src/codec.c src/xz.c src/zstd.c \
            src/commands.c src/play.c src/main.c
 HDRS     = src/include/util.h src/include/chart.h src/include/pcm.h src/include/codec.h \
-           src/include/xz.h src/include/zst.h src/include/cli.h third_party/miniaudio.h
+           src/include/xz.h src/include/zstd.h src/include/cli.h third_party/miniaudio.h
 OBJS     = $(SRCS:src/%.c=build/obj/%.o)
 
 all: $(BIN)

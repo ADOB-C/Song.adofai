@@ -24,7 +24,7 @@
 
 #include "util.h"
 #include "xz.h"
-#include "zst.h"
+#include "zstd.h"
 
 void die(const char *fmt, ...)
 {

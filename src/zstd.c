@@ -13,9 +13,9 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <zstd.h>
+#include <zstd.h>       /* official libzstd, found via -I */
 
-#include "zst.h"
+#include "zstd.h"       /* this module's interface, found via -iquote src/include */
 
 static const unsigned char ZSTD_MAGIC[4] = { 0x28, 0xB5, 0x2F, 0xFD };
 

@@ -20,7 +20,7 @@
 #include "chart.h"
 #include "pcm.h"
 #include "xz.h"
-#include "zst.h"
+#include "zstd.h"
 
 int decode_cmd(const char *chart, const char *out, double gain)
 {
