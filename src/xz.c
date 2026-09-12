@@ -1,21 +1,12 @@
 /* liblzma (xz) glue: chart <-> .xz — see README.md */
-/* feature-test macros must precede every include */
-#if defined(__APPLE__)
-#define _DARWIN_C_SOURCE            /* funopen lives behind full visibility */
-#endif
-#if defined(__linux__)
-#define _GNU_SOURCE                 /* fopencookie */
-#endif
 #define _POSIX_C_SOURCE 200809L
 #include <errno.h>
 #include <lzma.h>
-#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <sys/types.h>
 
 #include "xz.h"
 
@@ -31,6 +22,26 @@ int xz_sniff(const char *path)
     return got == sizeof h && memcmp(h, XZ_MAGIC, sizeof h) == 0;
 }
 
+static lzma_ret dec_init(lzma_stream *s)
+{
+#if LZMA_VERSION >= 50040000
+    lzma_mt mt;
+    memset(&mt, 0, sizeof mt);
+    mt.flags = LZMA_CONCATENATED;
+    mt.threads = lzma_cputhreads();
+    if (mt.threads == 0) mt.threads = 1;
+#if LZMA_VERSION >= 50060000
+    mt.memlimit_threading = UINT64_MAX;
+    mt.memlimit_stop = UINT64_MAX;
+#else
+    mt.memlimit = UINT64_MAX;
+#endif
+    return lzma_stream_decoder_mt(s, &mt);
+#else
+    return lzma_stream_decoder(s, UINT64_MAX, LZMA_CONCATENATED);
+#endif
+}
+
 Map xz_map(const char *path)
 {
     FILE *f = fopen(path, "rb");
@@ -40,7 +51,7 @@ Map xz_map(const char *path)
     if (fstat(fileno(f), &st) == 0 && st.st_size > 0) src = (size_t)st.st_size;
 
     lzma_stream s = LZMA_STREAM_INIT;
-    lzma_ret r = lzma_stream_decoder(&s, UINT64_MAX, LZMA_CONCATENATED);
+    lzma_ret r = dec_init(&s);
     if (r != LZMA_OK) die("xz decoder init failed (%d)", (int)r);
 
     unsigned char in[1 << 16], out[1 << 16];
@@ -77,20 +88,19 @@ Map xz_map(const char *path)
     lzma_end(&s);
     unsigned char *nb = realloc(buf, len ? len : 1); /* trim */
     if (nb) buf = nb;
-    Map m = { buf, len, src, 1 };
+    Map m = { buf, len, src, 1, MAP_XZ };
     return m;
 }
 
-/* ---- write side: cookie FILE* that routes bytes through liblzma ---- */
+/* ---- write side: cookie FILE* compressing through liblzma ---- */
 
 typedef struct {
-    FILE *u;                 /* underlying output file */
     lzma_stream s;
     unsigned char obuf[1 << 15];
     int bad;
 } XzC;
 
-static int feed(XzC *x, const void *data, size_t len)
+static int feed(XzC *x, const void *data, size_t len, FILE *u)
 {
     x->s.next_in = data;
     x->s.avail_in = len;
@@ -99,15 +109,18 @@ static int feed(XzC *x, const void *data, size_t len)
         x->s.avail_out = sizeof x->obuf;
         lzma_ret r = lzma_code(&x->s, LZMA_RUN);
         size_t have = sizeof x->obuf - x->s.avail_out;
-        if (have && fwrite(x->obuf, 1, have, x->u) != have) { x->bad = 1; return -1; }
+        if (have && fwrite(x->obuf, 1, have, u) != have) { x->bad = 1; return -1; }
         if (r != LZMA_OK) { x->bad = 1; return -1; }
     }
-    return (int)len;
+    return 0;
 }
 
-#if defined(__APPLE__)
-static int xz_cw(void *c, const char *b, int n) { return feed((XzC *)c, b, (size_t)n); }
-static int xz_cc(void *c)
+static int xzw(void *c, const void *b, size_t n, FILE *u)
+{
+    return feed((XzC *)c, b, n, u);
+}
+
+static int xzf(void *c, FILE *u)
 {
     XzC *x = c;
     lzma_ret r;
@@ -116,68 +129,35 @@ static int xz_cc(void *c)
         x->s.avail_out = sizeof x->obuf;
         r = lzma_code(&x->s, LZMA_FINISH);
         size_t have = sizeof x->obuf - x->s.avail_out;
-        if (have && fwrite(x->obuf, 1, have, x->u) != have) x->bad = 1;
+        if (have && fwrite(x->obuf, 1, have, u) != have) x->bad = 1;
     } while (r == LZMA_OK);
     if (r != LZMA_STREAM_END) x->bad = 1;
-    int rc = x->bad ? -1 : 0;
-    if (fclose(x->u) != 0) rc = -1;
     lzma_end(&x->s);
+    int rc = x->bad ? -1 : 0;
     free(x);
     return rc;
 }
+
 FILE *xz_open(const char *path, uint32_t preset)
 {
-    FILE *u = fopen(path, "wb");
-    if (!u) die("cannot write %s: %s", path, strerror(errno));
     XzC *x = calloc(1, sizeof *x);
     if (!x) die("out of memory");
-    x->u = u;
-    if (lzma_easy_encoder(&x->s, preset, LZMA_CHECK_CRC64) != LZMA_OK)
-        die("lzma encoder init failed");
-    FILE *f = funopen(x, NULL, xz_cw, NULL, xz_cc);
-    if (!f) die("cannot wrap xz stream for %s", path);
-    return f;
-}
-#elif defined(__linux__)
-static ssize_t xz_cw2(void *c, const char *b, size_t n)
-{
-    return (ssize_t)feed((XzC *)c, b, n);
-}
-static int xz_cc2(void *c)
-{
-    XzC *x = c;
     lzma_ret r;
-    do {
-        x->s.next_out = x->obuf;
-        x->s.avail_out = sizeof x->obuf;
-        r = lzma_code(&x->s, LZMA_FINISH);
-        size_t have = sizeof x->obuf - x->s.avail_out;
-        if (have && fwrite(x->obuf, 1, have, x->u) != have) x->bad = 1;
-    } while (r == LZMA_OK);
-    if (r != LZMA_STREAM_END) x->bad = 1;
-    int rc = x->bad ? -1 : 0;
-    if (fclose(x->u) != 0) rc = -1;
-    lzma_end(&x->s);
-    free(x);
-    return rc;
-}
-FILE *xz_open(const char *path, uint32_t preset)
-{
-    FILE *u = fopen(path, "wb");
-    if (!u) die("cannot write %s: %s", path, strerror(errno));
-    XzC *x = calloc(1, sizeof *x);
-    if (!x) die("out of memory");
-    x->u = u;
-    if (lzma_easy_encoder(&x->s, preset, LZMA_CHECK_CRC64) != LZMA_OK)
-        die("lzma encoder init failed");
-    cookie_io_functions_t io = { NULL, xz_cw2, NULL, xz_cc2 };
-    FILE *f = fopencookie(x, "w", io);
-    if (!f) die("cannot wrap xz stream for %s", path);
-    return f;
-}
+#if LZMA_VERSION >= 50040000
+    lzma_mt mt;
+    memset(&mt, 0, sizeof mt);
+    mt.threads = lzma_cputhreads();
+    if (mt.threads == 0) mt.threads = 1;
+    mt.block_size = 64u << 20;   /* same shape as `xz -T0 --block-size=64MiB` */
+    mt.preset = preset;
+    mt.check = LZMA_CHECK_CRC64;
+    r = lzma_stream_encoder_mt(&x->s, &mt);
 #else
-#error "xz write support needs funopen (macOS) or fopencookie (glibc)"
+    r = lzma_easy_encoder(&x->s, preset, LZMA_CHECK_CRC64);
 #endif
+    if (r != LZMA_OK) die("lzma encoder init failed (%d)", (int)r);
+    return cookie_wopen(path, x, xzw, xzf);
+}
 
 uint32_t xz_parse_preset(const char *s)
 {

@@ -52,33 +52,51 @@ make test            # 纯内存自检（不写盘）
 ./build/adofai-audio --help | --version | self-test
 ```
 
-### xz 压缩（省磁盘）
+### 压缩存储：xz / zstd（省磁盘）
 
-谱面是 ~1.4 GB/4 分钟的 JSON 文本，可用 xz 直接压到几十 MB：
+谱面是 ~1.4 GB/4 分钟的 JSON 文本，两种格式都支持，按输出扩展名选择：
 
 ```sh
-# 输出路径以 .xz 结尾 → 边编码边压缩（默认 level 6，--xz-level 0-9 / 9e 可调）
+# .xz → xz 压缩（默认 level 6，--xz-level 0-9 / 9e 可调）
 ./build/adofai-audio encode in.wav out.adofai.xz
-# decode / play / verify / info 按内容自动识别 .xz，直接读压缩谱面（扩展名无关）
-./build/adofai-audio decode out.adofai.xz back.wav
+# .zst / .zstd → zstd 压缩（默认 level 19，--zstd-level 1-22 可调）
+./build/adofai-audio encode in.wav out.adofai.zst --zstd-level 3
+# decode / play / verify / info 按内容自动识别两种格式（扩展名无关）
+./build/adofai-audio decode out.adofai.zst back.wav
 ./build/adofai-audio play out.adofai.xz
-./build/adofai-audio verify out.adofai.xz in.wav
-./build/adofai-audio info out.adofai.xz
+./build/adofai-audio verify out.adofai.zst in.wav
+./build/adofai-audio info out.adofai.zst
 ```
 
-产物为标准 `.xz`（CRC64，可与 `xz` 命令行互通）；编码仍在内存流式压缩、
-不落明文。实测（近似最坏情况：全采样随机变化）：4 分钟谱面 text ~1.4 GB →
-level 3 ~72 MB、**level 6 ~63 MB**（默认）、9e ~62 MB；音乐通常更小。读 `.xz`
-需整流解压进内存，谱面超大时请留意内存。
+产物是标准 `.xz`（CRC64）/ `.zst`（带校验和），可与 `xz` / `zstd` 命令行互通；
+编码全程内存流式、不落明文。编解码都走多线程（xz 分块 + liblzma MT，zstd 多
+worker）。
 
-依赖：POSIX（mmap）+ C11 + **liblzma**（`brew install xz` / Debian `liblzma-dev`；
-`make LZMA_CFLAGS=... LZMA_LIBS=...` 可指向自定义安装）；`play` 用随附的
-**miniaudio**（`third_party/miniaudio.h`，无需安装，macOS 需 CoreAudio 系框架，
-Linux 需 ALSA 等后端库）；`ffmpeg`/`ffprobe` 仅非 WAV 输入与容器标签时使用。
+实测选择依据（本机 256 MiB 真实谱面文本，多线程）：
+
+| 方案 | 压缩后 | 压缩耗时 | 说明 |
+|---|---|---|---|
+| xz 9e | 8.72 MB | 60 s | 体积最小（比 zstd 最高档还小 ~20%） |
+| xz 6（默认） | 10.8 MB | 7 s | 体积/速度折中 |
+| zstd 19（默认） | 10.7 MB | 14 s | 体积≈xz 6，解码快数倍 |
+| zstd 3 | 14.5 MB | 0.3 s | 追速度（约 +35% 体积） |
+
+4 分钟谱面 text ~1.4 GB 对应 xz 6/9e 约 60/43 MB、zstd 19/3 约 50/68 MB，都远
+低于 100 MB。读压缩谱面需整流解压进内存（超大谱面请留意内存）；多线程解码下
+1.24 GB 文本的 `.xz` 端到端（解压 + 解析）实测 3.2 s。
+
+依赖：POSIX（mmap）+ C11 + **liblzma**（`brew install xz` / Debian `liblzma-dev`）
++ **libzstd**（`brew install zstd` / Debian `libzstd-dev`）；可用 `make
+LZMA_CFLAGS=... ZSTD_CFLAGS=... LZMA_LIBS=... ZSTD_LIBS=...` 指向自定义安装；
+`play` 用随附的 **miniaudio**（`third_party/miniaudio.h`，无需安装，macOS 需
+CoreAudio 系框架，Linux 需 ALSA 等后端库）；`ffmpeg`/`ffprobe` 仅非 WAV 输入与
+容器标签时使用。
 
 第三方致谢：
 - xz 压缩使用 **XZ Utils (liblzma)** <https://tukaani.org/xz/>，采用 BSD Zero
   Clause (0BSD) 许可证，与本项目 MIT 许可兼容。
+- zstd 压缩使用 **Zstandard (libzstd)** <https://facebook.github.io/zstd/>，
+  BSD 3-Clause / GPLv2 双许可，本项目按 BSD 3-Clause 使用。
 - 播放使用 **miniaudio** <https://miniaud.io/>（v0.11.25，随附于
   `third_party/miniaudio.h`），public domain / MIT-0 双许可。
 
@@ -97,7 +115,7 @@ Linux 需 ALSA 等后端库）；`ffmpeg`/`ffprobe` 仅非 WAV 输入与容器�
 
 ```
 src/
-├── *.c             实现（util/chart/pcm/codec/xz/commands/play/main）
+├── *.c             实现（util/chart/pcm/codec/xz/zstd/commands/play/main）
 └── include/*.h     公共头文件（编译时 -Isrc/include）
 third_party/       随附第三方单头库（miniaudio.h）
 build/             编译产物（二进制 + .o，已被 .gitignore 排除）

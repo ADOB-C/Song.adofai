@@ -3,25 +3,32 @@ CFLAGS  ?= -O2
 CFLAGS  += -std=c11 -Wall -Wextra -D_POSIX_C_SOURCE=200809L -Isrc/include -Ithird_party
 LDLIBS   = -lm
 
-# liblzma (xz) — override LZMA_CFLAGS/LZMA_LIBS for custom installs
+# liblzma (xz) / libzstd — override *_CFLAGS/*_LIBS for custom installs
 UNAME_S  := $(shell uname -s)
 LZMA_CFLAGS ?=
 LZMA_LIBS   ?= -llzma
+ZSTD_CFLAGS ?=
+ZSTD_LIBS   ?= -lzstd
 ifeq ($(UNAME_S),Darwin)
   ifneq (,$(wildcard /opt/homebrew/include/lzma.h))
     LZMA_CFLAGS = -I/opt/homebrew/include
     LZMA_LIBS   = -L/opt/homebrew/lib -llzma
   endif
+  ifneq (,$(wildcard /opt/homebrew/include/zstd.h))
+    ZSTD_CFLAGS = -I/opt/homebrew/include
+    ZSTD_LIBS   = -L/opt/homebrew/lib -lzstd
+  endif
   AUDIO_LIBS = -framework CoreAudio -framework CoreFoundation \
                -framework AudioToolbox -framework AudioUnit
 endif
-CFLAGS  += $(LZMA_CFLAGS)
-LDLIBS  += $(LZMA_LIBS) $(AUDIO_LIBS)
+CFLAGS  += $(LZMA_CFLAGS) $(ZSTD_CFLAGS)
+LDLIBS  += $(LZMA_LIBS) $(ZSTD_LIBS) $(AUDIO_LIBS)
 
 BIN      = build/adofai-audio
-SRCS     = src/util.c src/chart.c src/pcm.c src/codec.c src/xz.c src/commands.c src/play.c src/main.c
+SRCS     = src/util.c src/chart.c src/pcm.c src/codec.c src/xz.c src/zstd.c \
+           src/commands.c src/play.c src/main.c
 HDRS     = src/include/util.h src/include/chart.h src/include/pcm.h src/include/codec.h \
-           src/include/xz.h src/include/cli.h third_party/miniaudio.h
+           src/include/xz.h src/include/zst.h src/include/cli.h third_party/miniaudio.h
 OBJS     = $(SRCS:src/%.c=build/obj/%.o)
 
 all: $(BIN)

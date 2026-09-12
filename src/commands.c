@@ -20,6 +20,7 @@
 #include "chart.h"
 #include "pcm.h"
 #include "xz.h"
+#include "zst.h"
 
 int decode_cmd(const char *chart, const char *out, double gain)
 {
@@ -85,8 +86,8 @@ int info_cmd(const char *chart)
     printf("events: %zu  angle entries: %ld\n", ev.n, entries);
     printf("sample rate (bpm/60): %.1f Hz  duration: %.3fs\n", rate, total / rate);
     if (m.owned)
-        printf("size: %.3f GB text (%.1f MB .xz on disk)\n",
-               m.n / 1e9, (double)m.src / 1e6);
+        printf("size: %.3f GB text (%.1f MB .%s on disk)\n",
+               m.n / 1e9, (double)m.src / 1e6, m.fmt == MAP_ZSTD ? "zst" : "xz");
     else
         printf("size: %.3f GB\n", m.n / 1e9);
     free(ev.floor);
@@ -116,7 +117,7 @@ void sanitize_name(const char *in, char *out, size_t outsz)
 
 int encode_cmd(const char *input, const char *outpath, const char *outdir,
                       const char *title_opt, const char *artist_opt,
-                      const char *xzopt)
+                      const char *xzopt, const char *zstdopt)
 {
     double t0 = now_s();
     Pcm p = pcm_load(input);
@@ -166,14 +167,14 @@ int encode_cmd(const char *input, const char *outpath, const char *outdir,
     }
 
     size_t l = strlen(out);
-    int compressed = l >= 3 && strcasecmp(out + l - 3, ".xz") == 0;
-    FILE *f;
-    if (compressed) {
-        f = xz_open(out, xz_parse_preset(xzopt));
-    } else {
-        f = fopen(out, "wb");
-        if (!f) die("cannot write %s: %s", out, strerror(errno));
-    }
+    int is_xz = l >= 3 && strcasecmp(out + l - 3, ".xz") == 0;
+    int is_zst = !is_xz && ((l >= 4 && strcasecmp(out + l - 4, ".zst") == 0) ||
+                            (l >= 5 && strcasecmp(out + l - 5, ".zstd") == 0));
+    int compressed = is_xz || is_zst;
+    FILE *f = is_xz ? xz_open(out, xz_parse_preset(xzopt))
+             : is_zst ? zstd_open(out, zstd_parse_level(zstdopt))
+                      : fopen(out, "wb");
+    if (!f) die("cannot write %s: %s", out, strerror(errno));
     size_t ne = 0;
     size_t bytes = encode_core(f, p.s, p.n, p.rate, title, artist, &ne);
     if (fclose(f) != 0) die("write error on %s", out);
@@ -184,9 +185,9 @@ int encode_cmd(const char *input, const char *outpath, const char *outdir,
         struct stat st;
         if (stat(out, &st) == 0) disk = (long long)st.st_size;
         printf("encoded %zu samples (%.1f kHz, %.1fs) -> %s\n"
-               "  text %.2f GB -> xz %.2f MB on disk (%.0fx) in %.1fs\n",
+               "  text %.2f GB -> %s %.2f MB on disk (%.0fx) in %.1fs\n",
                p.n, p.rate / 1000.0, (double)p.n / p.rate, out,
-               (double)bytes / 1e9,
+               (double)bytes / 1e9, is_zst ? "zstd" : "xz",
                disk < 0 ? 0.0 : (double)disk / 1e6,
                disk > 0 ? (double)bytes / (double)disk : 0.0, tel);
     } else {
@@ -224,7 +225,7 @@ int selftest_cmd(void)
     encode_core(mf, tone, (size_t)n, rate, "Tone Test", "Artist", &ne);
     fclose(mf);
 
-    Map m = { (const unsigned char *)cbuf, csize, 0, 0 };
+    Map m = { (const unsigned char *)cbuf, csize, 0, 0, 0 };
     Audio a = audio_decode_map(&m);
     int rc;
     if (a.total != (size_t)n) {
