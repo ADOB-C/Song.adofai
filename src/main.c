@@ -39,6 +39,9 @@ void usage(FILE *f)
             "      --gain F         playback gain (1.0 = original)\n"
             "  verify CHART REF     bit-exact diff against reference audio\n"
             "  info CHART           print artist/song/author + audio info\n"
+            "  bench CHART          per-preset size/speed + roundtrip (memory only)\n"
+            "      --slice MB       chart text to test (default 128)\n"
+            "      --full           use the whole chart text\n"
             "  self-test            roundtrip a synthetic tone\n"
             "\n"
             "options:\n"
@@ -61,6 +64,8 @@ int main(int argc, char **argv)
     const char *artist = NULL, *title = NULL, *outdir = NULL;
     const char *xzopt = NULL, *zstdopt = NULL;
     double gain = 1.0;
+    long slice_mb = 128;
+    int full = 0;
 
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -82,6 +87,10 @@ int main(int argc, char **argv)
             zstdopt = argv[++i];
         } else if (strcmp(a, "--gain") == 0 && i + 1 < argc) {
             gain = atof(argv[++i]);
+        } else if (strcmp(a, "--slice") == 0 && i + 1 < argc) {
+            slice_mb = atol(argv[++i]);
+        } else if (strcmp(a, "--full") == 0) {
+            full = 1;
         } else if (a[0] == '-' && a[1]) {
             fprintf(stderr, "unknown option: %s\n", a);
             usage(stderr);
@@ -119,6 +128,10 @@ int main(int argc, char **argv)
     if (strcmp(cmd, "info") == 0) {
         if (npos != 1) { usage(stderr); return 2; }
         return info_cmd(pos[0]);
+    }
+    if (strcmp(cmd, "bench") == 0) {
+        if (npos != 1) { usage(stderr); return 2; }
+        return bench_cmd(pos[0], slice_mb, full);
     }
     if (strcmp(cmd, "self-test") == 0) {
         return selftest_cmd();

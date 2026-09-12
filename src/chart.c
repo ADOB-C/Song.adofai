@@ -180,3 +180,20 @@ void scan_events(const Map *m, Events *ev)
     }
 }
 
+void chart_stream_info(const Map *m, size_t *samples, double *rate)
+{
+    Meta meta;
+    meta_parse(m, &meta);
+    long entries = angle_entries(m);
+    Events ev = {0};
+    scan_events(m, &ev);
+    int64_t last_floor = ev.n ? ev.floor[ev.n - 1] : 0;
+    size_t base = (meta.has_vol && fabs(meta.vol) <= 50.0 && entries > 0)
+                      ? (size_t)entries
+                      : (entries > 0 ? (size_t)(entries - 1) : 0);
+    *samples = base > (size_t)last_floor ? base : (size_t)last_floor;
+    *rate = meta.has_bpm && meta.bpm > 0 ? meta.bpm / 60.0 : 44100.0;
+    free(ev.floor);
+    free(ev.vol);
+}
+

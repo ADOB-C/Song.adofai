@@ -74,12 +74,9 @@ int info_cmd(const char *chart)
     long entries = angle_entries(&m);
     Events ev = {0};
     scan_events(&m, &ev);
-    int64_t last_floor = ev.n ? ev.floor[ev.n - 1] : 0;
-    size_t base = (meta.has_vol && fabs(meta.vol) <= 50.0 && entries > 0)
-                      ? (size_t)entries
-                      : (entries > 0 ? (size_t)(entries - 1) : 0);
-    size_t total = base > (size_t)last_floor ? base : (size_t)last_floor;
-    double rate = meta.has_bpm && meta.bpm > 0 ? meta.bpm / 60.0 : 44100.0;
+    size_t total = 0;
+    double rate = 44100.0;
+    chart_stream_info(&m, &total, &rate);
     printf("artist: %s\n", meta.artist[0] ? meta.artist : "(none)");
     printf("song:   %s\n", meta.song[0] ? meta.song : "(none)");
     printf("author: %s\n", meta.author[0] ? meta.author : "(none)");

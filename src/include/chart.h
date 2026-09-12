@@ -16,3 +16,5 @@ typedef struct {
 void meta_parse(const Map *m, Meta *meta);
 long angle_entries(const Map *m);
 void scan_events(const Map *m, Events *ev);
+/* derived stream info: sample count + rate from bpm/angleData/events */
+void chart_stream_info(const Map *m, size_t *samples, double *rate);

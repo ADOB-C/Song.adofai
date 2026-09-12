@@ -10,4 +10,5 @@ int decode_cmd(const char *chart, const char *out, double gain);
 int play_cmd(const char *chart, double gain);
 int verify_cmd(const char *chart, const char *ref);
 int info_cmd(const char *chart);
+int bench_cmd(const char *chart, long slice_mb, int full);
 int selftest_cmd(void);

@@ -49,6 +49,11 @@ make test            # 纯内存自检（不写盘）
 # 谱面元数据 + 音频信息
 ./build/adofai-audio info chart.adofai
 
+# 压缩基准：各档位体积/速度 + 往返校验（全内存，零落盘）
+./build/adofai-audio bench chart.adofai.xz            # 默认取中段 128 MiB 文本
+./build/adofai-audio bench chart.adofai --slice 32    # 更快
+./build/adofai-audio bench chart.adofai --full        # 整份文本（最慢最准）
+
 ./build/adofai-audio --help | --version | self-test
 ```
 
@@ -85,6 +90,23 @@ worker）。
 低于 100 MB。读压缩谱面需整流解压进内存（超大谱面请留意内存）；多线程解码下
 1.24 GB 文本的 `.xz` 端到端（解压 + 解析）实测 3.2 s。
 
+`bench` 子命令可在内存里对任意档位复测（零落盘）：取谱面文本中段切片（避开头部
+`angleData` 零区与尾部稀疏区），逐档位压缩→解压→比字节，并按该谱面自身的
+「文本字节/音频秒」外推 3 分钟体积、与 100 MB 预算比对。真实谱面（1.24 GB 文本，
+190.7 s）32 MiB 切片实测：
+
+```
+codec lvl        size    ratio  comp MB/s   dec MB/s  est 3min  budget roundtrip
+xz    3        1.71 MB    19.6x       64.4      480.1    59.5 MB    PASS OK
+xz    6        1.55 MB    21.7x       14.2      504.2    53.9 MB    PASS OK
+xz    9e       1.28 MB    26.3x        3.9      489.9    44.5 MB    PASS OK
+zstd  3        2.09 MB    16.0x     4305.7     3710.5    72.9 MB    PASS OK
+zstd  19       1.62 MB    20.7x        5.0     3345.7    56.5 MB    PASS OK
+zstd  22       1.58 MB    21.2x        4.0     3350.8    55.2 MB    PASS OK
+```
+
+（该谱面磁盘上实际 45.2 MB/190.7 s，换算 3 分钟 ≈42.7 MB，与 xz 9e 外推值吻合。）
+
 依赖：POSIX（mmap）+ C11 + **liblzma**（`brew install xz` / Debian `liblzma-dev`）
 + **libzstd**（`brew install zstd` / Debian `libzstd-dev`）；可用 `make
 LZMA_CFLAGS=... ZSTD_CFLAGS=... LZMA_LIBS=... ZSTD_LIBS=...` 指向自定义安装；
@@ -115,7 +137,7 @@ CoreAudio 系框架，Linux 需 ALSA 等后端库）；`ffmpeg`/`ffprobe` 仅非
 
 ```
 src/
-├── *.c             实现（util/chart/pcm/codec/xz/zstd/commands/play/main）
+├── *.c             实现（util/chart/pcm/codec/xz/zstd/commands/bench/play/main）
 └── include/*.h     公共头文件（编译时 -Isrc/include）
 third_party/       随附第三方单头库（miniaudio.h）
 build/             编译产物（二进制 + .o，已被 .gitignore 排除）

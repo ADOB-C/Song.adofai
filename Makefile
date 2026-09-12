@@ -28,7 +28,7 @@ LDLIBS  += $(LZMA_LIBS) $(ZSTD_LIBS) $(AUDIO_LIBS)
 
 BIN      = build/adofai-audio
 SRCS     = src/util.c src/chart.c src/pcm.c src/codec.c src/xz.c src/zstd.c \
-           src/commands.c src/play.c src/main.c
+           src/commands.c src/bench.c src/play.c src/main.c
 HDRS     = src/include/util.h src/include/chart.h src/include/pcm.h src/include/codec.h \
            src/include/xz.h src/include/zstd.h src/include/cli.h third_party/miniaudio.h
 OBJS     = $(SRCS:src/%.c=build/obj/%.o)
