@@ -31,8 +31,8 @@ void usage(FILE *f)
             "      --artist NAME    override artist (default: ffprobe tags)\n"
             "      --title NAME     override song title\n"
             "      --out-dir DIR    directory for auto-named output\n"
-            "      --xz-level L     xz preset 0-9 (optionally 9e); default 6\n"
-            "      --zstd-level L   zstd level 1-22; default 19\n"
+            "      --xz-level L     xz preset 0-9 (optionally 9e); default 6 (9e = smallest)\n"
+            "      --zstd-level L   zstd level 1-22; default 19 (3 = fastest)\n"
             "  decode CHART OUT     .adofai / .xz / .zst -> mono s16 WAV\n"
             "      --gain F         output gain (1.0 = bit-exact)\n"
             "  play CHART           play .adofai / .xz / .zst on the audio device\n"
@@ -40,7 +40,7 @@ void usage(FILE *f)
             "  verify CHART REF     bit-exact diff against reference audio\n"
             "  info CHART           print artist/song/author + audio info\n"
             "  bench CHART          per-preset size/speed + roundtrip (memory only)\n"
-            "      --slice MB       chart text to test (default 128)\n"
+            "      --slice MB       chart text to test (default 256)\n"
             "      --full           use the whole chart text\n"
             "  self-test            roundtrip a synthetic tone\n"
             "\n"
@@ -64,7 +64,7 @@ int main(int argc, char **argv)
     const char *artist = NULL, *title = NULL, *outdir = NULL;
     const char *xzopt = NULL, *zstdopt = NULL;
     double gain = 1.0;
-    long slice_mb = 128;
+    long slice_mb = 256;
     int full = 0;
 
     for (int i = 1; i < argc; i++) {

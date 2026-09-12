@@ -50,8 +50,8 @@ make test            # 纯内存自检（不写盘）
 ./build/adofai-audio info chart.adofai
 
 # 压缩基准：各档位体积/速度 + 往返校验（全内存，零落盘）
-./build/adofai-audio bench chart.adofai.xz            # 默认取中段 128 MiB 文本
-./build/adofai-audio bench chart.adofai --slice 32    # 更快
+./build/adofai-audio bench chart.adofai.xz            # 默认取中段 256 MiB 文本
+./build/adofai-audio bench chart.adofai --slice 64    # 更快（1 block）
 ./build/adofai-audio bench chart.adofai --full        # 整份文本（最慢最准）
 
 ./build/adofai-audio --help | --version | self-test
@@ -90,22 +90,38 @@ worker）。
 低于 100 MB。读压缩谱面需整流解压进内存（超大谱面请留意内存）；多线程解码下
 1.24 GB 文本的 `.xz` 端到端（解压 + 解析）实测 3.2 s。
 
-`bench` 子命令可在内存里对任意档位复测（零落盘）：取谱面文本中段切片（避开头部
+`bench` 子命令可在内存里对各档位复测（零落盘）：取谱面文本中段切片（避开头部
 `angleData` 零区与尾部稀疏区），逐档位压缩→解压→比字节，并按该谱面自身的
-「文本字节/音频秒」外推 3 分钟体积、与 100 MB 预算比对。真实谱面（1.24 GB 文本，
-190.7 s）32 MiB 切片实测：
+「文本字节/音频秒」外推 3 分钟体积、与 100 MB 预算比对。默认切片 256 MiB
+（= 4 个 64 MiB block，MT 才真正跑起来）。真实谱面（1.24 GB 文本，190.7 s）：
 
 ```
 codec lvl        size    ratio  comp MB/s   dec MB/s  est 3min  budget roundtrip
-xz    3        1.71 MB    19.6x       64.4      480.1    59.5 MB    PASS OK
-xz    6        1.55 MB    21.7x       14.2      504.2    53.9 MB    PASS OK
-xz    9e       1.28 MB    26.3x        3.9      489.9    44.5 MB    PASS OK
-zstd  3        2.09 MB    16.0x     4305.7     3710.5    72.9 MB    PASS OK
-zstd  19       1.62 MB    20.7x        5.0     3345.7    56.5 MB    PASS OK
-zstd  22       1.58 MB    21.2x        4.0     3350.8    55.2 MB    PASS OK
+xz    3       13.53 MB    19.8x       82.7     1685.0    58.9 MB    PASS OK
+xz    6       12.27 MB    21.9x       42.9     1657.7    53.5 MB    PASS OK
+xz    9e      10.07 MB    26.6x       11.2     1388.5    43.9 MB    PASS OK
+zstd  3       16.56 MB    16.2x     5699.9     3078.4    72.1 MB    PASS OK
+zstd  12      15.15 MB    17.7x      593.8     3192.7    66.0 MB    PASS OK
+zstd  19      12.22 MB    22.0x       20.1     3764.6    53.2 MB    PASS OK
 ```
 
-（该谱面磁盘上实际 45.2 MB/190.7 s，换算 3 分钟 ≈42.7 MB，与 xz 9e 外推值吻合。）
+**默认值就是按这张表推的**（换算到 4 分钟谱面 ≈1.56 GB 文本，预算 100 MB）：
+
+| 档位 | 4 分钟体积 | 预算余量 | 编码耗时 | 定位 |
+|---|---|---|---|---|
+| xz 3 | ~78 MB | 21% | ~19 s | 快，余量一般 |
+| **xz 6（默认）** | **~71 MB** | **29%** | **~36 s** | 拐点：体积/耗时平衡 |
+| xz 9e | ~59 MB | 41% | ~140 s | 归档档，最小体积 |
+| zstd 3 | ~96 MB | 4% | ~0.3 s | 极快，但几乎贴线 |
+| zstd 12 | ~88 MB | 12% | ~3 s | zstd 的「快速档」上限 |
+| **zstd 19（默认）** | **~71 MB** | **29%** | **~78 s** | 体积≈xz 6，解码快 ~2x |
+
+- `xz 6` 与 `zstd 19` 是唯二「体积≈71 MB 且余量 29%」的点，故都保留为默认；
+  想要最小体积用 `--xz-level 9e`（+18% 节省、约 4x 时间），想要秒级编码用
+  `zstd --zstd-level 3`（但余量仅 4%，别再压更长的曲子）。
+- `zstd 22` 被移除：只比 19 小 1.3%，却慢 2.3x（实测同片 3.10 vs 3.14 MB）。
+- 该谱面磁盘上实际 45.2 MB/190.7 s，换算 3 分钟 ≈42.7 MB，与 xz 9e 外推的
+  43.9 MB 吻合。
 
 依赖：POSIX（mmap）+ C11 + **liblzma**（`brew install xz` / Debian `liblzma-dev`）
 + **libzstd**（`brew install zstd` / Debian `libzstd-dev`）；可用 `make

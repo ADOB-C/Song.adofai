@@ -187,9 +187,9 @@ int bench_cmd(const char *chart, long slice_mb, int full)
     printf("  text %.3f GB, %.1f s @ %.1f Hz, %u threads\n",
            m.n / 1e9, dur, rate, cpus());
     if (off || n != m.n)
-        printf("  slice %.0f MiB at %.0f%% of text (whole text: %s)\n",
-               n / 1048576.0, m.n ? 100.0 * (double)off / (double)m.n : 0.0,
-               full ? "yes" : "--full to use it");
+        printf("  slice %.0f MiB (%u x %u MiB xz blocks) at %.0f%% of text\n",
+               n / 1048576.0, (unsigned)((n + XZ_BLOCK - 1) / XZ_BLOCK),
+               (unsigned)(XZ_BLOCK / 1048576), m.n ? 100.0 * (double)off / (double)m.n : 0.0);
     if (dur > 0)
         printf("  budget %.0f MB / %.0f s  ->  text %.2f MB per audio sec\n",
                BUDGET_MB, BUDGET_SEC, bps / 1e6);
@@ -197,13 +197,15 @@ int bench_cmd(const char *chart, long slice_mb, int full)
            "codec", "lvl", "size", "ratio", "comp MB/s", "dec MB/s",
            "est 3min", "budget", "roundtrip");
 
+    /* matrix derived from measurements: xz 9e = smallest, xz 6 = knee (default),
+     * zstd 19 ~= xz 6 size, zstd 3/12 = fast tiers; zstd 22 dominated (drop) */
     static const Cand cands[] = {
         { "xz", "3", 0, 3, 0 },
         { "xz", "6", 0, 6, 0 },
         { "xz", "9e", 0, 9 | LZMA_PRESET_EXTREME, 0 },
         { "zstd", "3", 1, 0, 3 },
+        { "zstd", "12", 1, 0, 12 },
         { "zstd", "19", 1, 0, 19 },
-        { "zstd", "22", 1, 0, 22 },
     };
     unsigned char *dec = malloc(n + 64);
     if (!dec) die("out of memory");
