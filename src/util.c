@@ -44,6 +44,17 @@ double now_s(void)
     return ts.tv_sec + ts.tv_nsec / 1e9;
 }
 
+int log_level = 1;
+
+void log_msg(int level, const char *fmt, ...)
+{
+    if (level > log_level) return;
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+}
+
 Map map_file(const char *path)
 {
     Map m = {0};

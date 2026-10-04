@@ -6,20 +6,24 @@
 
 ## 快速开始
 
+语法仿 ffmpeg：`-i` 标输入、位置参数是输出、输出扩展名决定格式，另有
+`-y/-n`、`-loglevel quiet|info|verbose`、`-hide_banner`。
+
 ```sh
 make                       # → ./build/adofai-music
 make test                  # 纯内存自检（不写盘）
 
-./build/adofai-music encode in.m4a out.adofai --title "Unity" --artist "TheFatRat"
-./build/adofai-music encode in.wav out.adofai.xz    # .xz（或 .zst）边编码边压缩
-./build/adofai-music play   out.adofai.xz --gain 0.5
-./build/adofai-music decode out.adofai.xz back.wav
-./build/adofai-music verify out.adofai.xz in.m4a
-./build/adofai-music info   out.adofai.xz
-./build/adofai-music bench  out.adofai.xz           # 压缩档位对比（零落盘）
+./build/adofai-music -i in.m4a -metadata song="Unity" -metadata artist="TheFatRat" out.adofai
+./build/adofai-music -i in.wav out.adofai.xz     # .xz（或 .zst）边编码边压缩
+./build/adofai-music -i out.adofai.xz back.wav   # 谱面 → WAV
+./build/adofai-music -i out.adofai.xz -play -gain 0.5
+./build/adofai-music -i out.adofai.xz -verify in.m4a
+./build/adofai-music -i out.adofai.xz -show
+./build/adofai-music -i out.adofai.xz -bench     # 压缩档位对比（零落盘）
 ```
 
-`decode / play / verify / info` 按内容自动识别明文 `.adofai`、`.xz`、`.zst`。
+`-show / -play / -verify / decode` 按内容自动识别明文 `.adofai`、`.xz`、`.zst`；
+输出文件已存在时默认拒绝覆盖，加 `-y` 才行。
 
 ## 格式（v2）
 
@@ -32,8 +36,8 @@ make test                  # 纯内存自检（不写盘）
 
 ## 压缩与默认档
 
-输出扩展名决定格式：`.xz`（默认 level 6，`--xz-level 9e` 最小）或 `.zst`
-（默认 19，`--zstd-level 3` 最快）；编解码均多线程，"3–4 分钟 < 100 MB" 有余量。
+输出扩展名决定格式：`.xz`（默认 level 6，`-xz-level 9e` 最小）或 `.zst`
+（默认 19，`-zstd-level 3` 最快）；编解码均多线程，"3–4 分钟 < 100 MB" 有余量。
 
 | 档位 | 4 分钟体积 | 编码耗时 |
 |---|---|---|

@@ -93,26 +93,7 @@ int info_cmd(const char *chart)
     return 0;
 }
 
-void sanitize_name(const char *in, char *out, size_t outsz)
-{
-    size_t i = 0, o = 0;
-    int prev_space = 0;
-    for (; in[i] && o + 1 < outsz; i++) {
-        char c = in[i];
-        if (strchr("\\/:*?\"<>|", c) || (unsigned char)c < 0x20) c = '-';
-        if (c == ' ') {
-            if (prev_space) continue;
-            prev_space = 1;
-        } else {
-            prev_space = 0;
-        }
-        out[o++] = c;
-    }
-    while (o && (out[o - 1] == ' ' || out[o - 1] == '.')) o--;
-    out[o] = '\0';
-}
-
-int encode_cmd(const char *input, const char *outpath, const char *outdir,
+int encode_cmd(const char *input, const char *outpath,
                       const char *title_opt, const char *artist_opt,
                       const char *xzopt, const char *zstdopt)
 {
@@ -132,36 +113,7 @@ int encode_cmd(const char *input, const char *outpath, const char *outdir,
     }
 
     char out[MAX_PATH_LEN];
-    if (outpath) {
-        snprintf(out, sizeof out, "%s", outpath);
-    } else {
-        char name[512];
-        if (title[0]) {
-            char t[256], a[256];
-            sanitize_name(title, t, sizeof t);
-            if (artist[0]) {
-                sanitize_name(artist, a, sizeof a);
-                snprintf(name, sizeof name, "%s - %s.adofai", a, t);
-            } else {
-                snprintf(name, sizeof name, "%s.adofai", t);
-            }
-        } else {
-            const char *base = strrchr(input, '/');
-            base = base ? base + 1 : input;
-            const char *dot = strrchr(base, '.');
-            size_t bl = dot ? (size_t)(dot - base) : strlen(base);
-            char stem[256];
-            if (bl >= sizeof stem) bl = sizeof stem - 1;
-            memcpy(stem, base, bl);
-            stem[bl] = '\0';
-            sanitize_name(stem, name, sizeof name);
-            snprintf(name, sizeof name, "%s.adofai", name);
-        }
-        if (outdir)
-            snprintf(out, sizeof out, "%s/%s", outdir, name);
-        else
-            snprintf(out, sizeof out, "%s", name);
-    }
+    snprintf(out, sizeof out, "%s", outpath);
 
     size_t l = strlen(out);
     int is_xz = l >= 3 && strcasecmp(out + l - 3, ".xz") == 0;

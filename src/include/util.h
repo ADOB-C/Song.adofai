@@ -22,6 +22,13 @@ typedef struct {
 
 void die(const char *fmt, ...);
 double now_s(void);
+
+/* ffmpeg-style log levels: 0 quiet, 1 info (default), 2 verbose */
+extern int log_level;
+void log_msg(int level, const char *fmt, ...);
+#define log_info(...)    log_msg(1, __VA_ARGS__)
+#define log_verbose(...) log_msg(2, __VA_ARGS__)
+
 Map map_file(const char *path);   /* plain mmap only */
 Map map_open(const char *path);   /* mmap, or decompress .xz/.zst on the fly */
 void map_close(Map *m);           /* munmap or free per owned; zeroes *m */

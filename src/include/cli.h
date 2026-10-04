@@ -3,7 +3,7 @@
 #include "pcm.h"
 #include "chart.h"
 
-int encode_cmd(const char *input, const char *outpath, const char *outdir,
+int encode_cmd(const char *input, const char *outpath,
               const char *title_opt, const char *artist_opt,
               const char *xzopt, const char *zstdopt);
 int decode_cmd(const char *chart, const char *out, double gain);

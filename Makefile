@@ -47,7 +47,7 @@ clean:
 	rm -rf build
 
 test: $(BIN)
-	./$(BIN) self-test
+	./$(BIN) -self-test
 
 install: $(BIN)
 	install -m 0755 $(BIN) /usr/local/bin/adofai-music

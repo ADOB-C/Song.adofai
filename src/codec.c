@@ -86,7 +86,7 @@ Audio audio_decode_map(const Map *m)
     }
     for (; pos < total; pos++) out[pos] = (int16_t)cur;
 
-    fprintf(stderr, "read %zu events, %zu samples\n", ev.n, total);
+    log_info("read %zu events, %zu samples\n", ev.n, total);
     free(ev.floor);
     free(ev.vol);
 
