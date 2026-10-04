@@ -53,23 +53,40 @@ Pcm pcm_read_wav(const char *path, int want)
     if (data && (size_t)(m.p + m.n - data) < dlen)
         dlen = (size_t)(m.p + m.n - data);          /* trust the file size */
     int src_s16 = fmt == 1 && bits == 16;
+    int src_s24 = fmt == 1 && bits == 24;
     int src_f32 = fmt == 3 && bits == 32;
-    if (ch == 1 && data && dlen && rate > 0 && (src_s16 || src_f32)) {
-        size_t n = src_f32 ? dlen / 4 : dlen / 2;
-        int to_f32 = want == SAMPLE_F32 || (want == SAMPLE_AUTO && src_f32);
+    if (ch == 1 && data && dlen && rate > 0 && (src_s16 || src_s24 || src_f32)) {
+        size_t n = src_f32 ? dlen / 4 : src_s24 ? dlen / 3 : dlen / 2;
+        int to_f32 = want == SAMPLE_F32 ||
+                     (want == SAMPLE_AUTO && (src_f32 || src_s24));
         p.n = n;
         p.rate = rate;
         if (to_f32) {
             p.f = malloc(n * sizeof *p.f);
             if (!p.f) die("out of memory");
-            for (size_t i = 0; i < n; i++)
-                p.f[i] = src_f32 ? rd_f32(data + i * 4) : (float)(rd_s16(data + i * 2) / 32768.0);
+            for (size_t i = 0; i < n; i++) {
+                if (src_f32) {
+                    p.f[i] = rd_f32(data + i * 4);
+                } else if (src_s24) {
+                    const unsigned char *b = data + i * 3;
+                    int32_t v = b[0] | (b[1] << 8) | (b[2] << 16);
+                    if (v & 0x800000) v -= 0x1000000;   /* sign extend */
+                    p.f[i] = (float)(v / 8388608.0);   /* 2^23: exact in float32 */
+                } else {
+                    p.f[i] = (float)(rd_s16(data + i * 2) / 32768.0);
+                }
+            }
         } else {
             p.s = malloc(n * 2);
             if (!p.s) die("out of memory");
             for (size_t i = 0; i < n; i++) {
                 if (src_f32) {
                     p.s[i] = pcm_s16_from_f32(rd_f32(data + i * 4));
+                } else if (src_s24) {
+                    const unsigned char *b = data + i * 3;
+                    int32_t v = b[0] | (b[1] << 8) | (b[2] << 16);
+                    if (v & 0x800000) v -= 0x1000000;
+                    p.s[i] = pcm_s16_from_f32((float)(v / 8388608.0));
                 } else {
                     memcpy(&p.s[i], data + i * 2, 2);
                 }
@@ -80,16 +97,18 @@ Pcm pcm_read_wav(const char *path, int want)
     return p;
 }
 
-static int ffprobe_stream(const char *path, int *rate, char *sf, size_t sfsz)
+static int ffprobe_stream(const char *path, int *rate, char *sf, size_t sfsz, int *bits)
 {
     char cmd[9000];
     snprintf(cmd, sizeof cmd,
-             "ffprobe -v error -show_entries stream=sample_rate,sample_fmt "
+             "ffprobe -v error -show_entries "
+             "stream=sample_rate,sample_fmt,bits_per_raw_sample "
              "-of default=noprint_wrappers=1 \"%s\"", path);
     FILE *fp = popen(cmd, "r");
     if (!fp) return -1;
     char line[128];
     *rate = 0;
+    *bits = 0;
     if (sfsz) sf[0] = '\0';
     while (fgets(line, sizeof line, fp)) {
         char *eq = strchr(line, '=');
@@ -98,28 +117,32 @@ static int ffprobe_stream(const char *path, int *rate, char *sf, size_t sfsz)
         char *val = eq + 1;
         val[strcspn(val, "\r\n")] = '\0';
         if (strcmp(line, "sample_rate") == 0) *rate = atoi(val);
+        else if (strcmp(line, "bits_per_raw_sample") == 0) *bits = atoi(val);
         else if (sfsz && strcmp(line, "sample_fmt") == 0) snprintf(sf, sfsz, "%s", val);
     }
     pclose(fp);
     return *rate > 0 ? 0 : -1;
 }
 
-static int fmt_is_float(const char *sf)
-{
-    return strncmp(sf, "flt", 3) == 0 || strncmp(sf, "dbl", 3) == 0 ||
-           strncmp(sf, "s32", 3) == 0;
-}
-
 Pcm pcm_ffmpeg(const char *path, int want)
 {
-    int rate = 0;
+    int rate = 0, bits = 0;
     char sf[32] = {0};
-    if (ffprobe_stream(path, &rate, sf, sizeof sf) != 0)
+    if (ffprobe_stream(path, &rate, sf, sizeof sf, &bits) != 0)
         die("cannot determine sample format of %s", path);
-    int use_f32 = want == SAMPLE_F32 || (want == SAMPLE_AUTO && fmt_is_float(sf));
-    if (want == SAMPLE_AUTO && strncmp(sf, "s32", 3) == 0)
-        log_info("note: 32-bit integer input is kept at float32 precision "
-                 "(24-bit mantissa)\n");
+    int is_flt = strncmp(sf, "flt", 3) == 0;
+    int is_dbl = strncmp(sf, "dbl", 3) == 0;
+    int is_s32 = strncmp(sf, "s32", 3) == 0;
+    if (want == SAMPLE_AUTO) {
+        /* never degrade silently: float32 only carries a 24-bit mantissa */
+        if (is_dbl)
+            die("%s is 64-bit float; a chart stores at most float32. "
+                "pass -sample_fmt f32 to accept 32-bit storage", path);
+        if (is_s32 && bits > 24)
+            die("%s is %d-bit integer; float32 keeps only 24 bits. "
+                "pass -sample_fmt f32 to accept 24-bit storage", path, bits);
+    }
+    int use_f32 = want == SAMPLE_F32 || (want == SAMPLE_AUTO && (is_flt || is_dbl || is_s32));
     char cmd[9000];
     snprintf(cmd, sizeof cmd, "ffmpeg -v error -i \"%s\" -f %s -ac 1 pipe:1",
              path, use_f32 ? "f32le" : "s16le");

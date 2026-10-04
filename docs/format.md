@@ -26,8 +26,13 @@
   解码端在 `"actions"` 附近 4 KiB 内查找该标记；没有标记的谱（旧版/第三方）回落到
   `settings.hitsoundVolume ≤ 50` 的启发式判别。`EditorComment` 是 ADOFAI 标准事件，
   多个第三方解析器都有对应类，编辑器里只显示为注释、不影响玩法。
-- **注意**：32-bit 整数 PCM（`s32`）超出 float32 的 24 位尾数，会被保留到 24 位精度
-  （编解码器会打印提示）；16/24-bit PCM 与 float32 均无损。
+- **`-sample_fmt auto`（默认）跟随源格式**：u8/s16 → int16 谱；24-bit PCM、32-bit float、
+  以及 AAC/Opus 等解码器输出的 `fltp` → float32 谱。以上都无损。8/16/24-bit 整数与
+  32-bit float 都喂得进；**native WAV 解析支持 16/24-bit PCM 与 32-bit float**，
+  其余走 ffmpeg/ffprobe。
+- **不会悄悄掉精度**：64-bit float（`dbl`）与 32-bit 整数（`bits_per_raw_sample > 24`）
+  超出 float32 的 24 位尾数，`auto` 下直接报错并要求显式 `-sample_fmt f32` 接受降精度；
+  8-bit 无符号只占 8 位，进 int16 谱无损。
 - 输出为严格合法 JSON：数组元素之间才写逗号，**没有尾逗号**（旧版本会写尾逗号，
   ADOFAI 容忍、严格解析器不容忍）。
 

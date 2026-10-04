@@ -36,7 +36,9 @@ make test                  # 纯内存自检（不写盘）
 - `bpm = 采样率 × 60`；只在采样值变化处写 `SetHitsound`（静音/重复值零成本）
 - `angleData` 全 0、单行密排；内嵌 `artist / song / author`
 - 采样：int16 谱 `int16/655.36`（dyadic 精确）；**float32 谱 `value×50`，9 位有效数字，
-  含 `-0.0` 在内逐位无损**（24-bit PCM 也可精确落入）
+  含 `-0.0` 在内逐位无损**
+- `-sample_fmt auto`（默认）跟随源精度：8/16-bit → int16 谱；24-bit PCM 与 32-bit float →
+  float32 谱，均无损；64-bit float / 32-bit 整数超出 float32 精度，auto 会报错而不静默降级
 - float32 谱由首个 `EditorComment` 事件标记 `adofai-music:f32`（标准事件，编辑器可见、
   不影响玩法），解码端据此判模式；无标记的旧/第三方谱按 settings 音量启发式判别
 - 输出是**严格合法 JSON**（无尾逗号），任何标准解析器都能读
