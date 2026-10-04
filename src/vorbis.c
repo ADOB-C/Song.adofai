@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "util.h"                      /* Map / map_file / map_close / die */
 
@@ -27,6 +28,29 @@ int ogg_sniff(const char *path)
     size_t got = fread(h, 1, sizeof h, f);
     fclose(f);
     return got == sizeof h && memcmp(h, "OggS", 4) == 0;
+}
+
+char *ogg_tag(const char *path, const char *key)
+{
+    Map m = map_file(path);
+    char *out = NULL;
+    if (m.n == 0 || m.n > (size_t)INT_MAX) {
+        map_close(&m);
+        return NULL;
+    }
+    int err = 0;
+    stb_vorbis *v = stb_vorbis_open_memory(m.p, (int)m.n, &err, NULL);
+    if (v) {
+        stb_vorbis_comment vc = stb_vorbis_get_comment(v);
+        size_t kl = strlen(key);
+        for (int i = 0; i < vc.comment_list_length && !out; i++) {
+            const char *c = vc.comment_list[i];
+            if (strncasecmp(c, key, kl) == 0 && c[kl] == '=') out = strdup(c + kl + 1);
+        }
+        stb_vorbis_close(v);
+    }
+    map_close(&m);
+    return out;
 }
 
 Pcm ogg_load(const char *path, int want)

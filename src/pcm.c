@@ -118,11 +118,12 @@ Pcm pcm_read_wav(const char *path, int want)
 static int ffprobe_stream(const char *path, int *rate, char *sf, size_t sfsz, int *bits,
                           int *channels, char *codec, size_t codecsz)
 {
-    char cmd[9000];
+    char cmd[16384], fpexe[MAX_PATH_LEN + 16];
+    tool_path(fpexe, sizeof fpexe, "ffprobe");
     snprintf(cmd, sizeof cmd,
-             "ffprobe -v error -show_entries "
+             "\"%s\" -v error -show_entries "
              "stream=sample_rate,sample_fmt,bits_per_raw_sample,channels,codec_name "
-             "-of default=noprint_wrappers=1 \"%s\"", path);
+             "-of default=noprint_wrappers=1 \"%s\"", fpexe, path);
     FILE *fp = popen(cmd, "r");
     if (!fp) return -1;
     char line[128];
@@ -176,9 +177,10 @@ Pcm pcm_ffmpeg(const char *path, int want)
                 "pass -sample_fmt f32 to accept 24-bit storage", path, bits);
     }
     int use_f32 = want == SAMPLE_F32 || (want == SAMPLE_AUTO && (is_flt || is_dbl || is_s32));
-    char cmd[9000];
-    snprintf(cmd, sizeof cmd, "ffmpeg -v error -i \"%s\" -f %s -ac 1 pipe:1",
-             path, use_f32 ? "f32le" : "s16le");
+    char cmd[16384], ff[MAX_PATH_LEN + 16];
+    tool_path(ff, sizeof ff, "ffmpeg");
+    snprintf(cmd, sizeof cmd, "\"%s\" -v error -i \"%s\" -f %s -ac 1 pipe:1",
+             ff, path, use_f32 ? "f32le" : "s16le");
     FILE *fp = popen(cmd, "r");
     if (!fp) die("cannot run ffmpeg for %s", path);
     size_t bps = use_f32 ? 4 : 2, cap = 1 << 20, len = 0;
@@ -226,10 +228,11 @@ Pcm pcm_load(const char *path, int want)
 
 char *ffprobe_tag(const char *path, const char *key)
 {
-    char cmd[9000];
+    char cmd[16384], fpexe[MAX_PATH_LEN + 16];
+    tool_path(fpexe, sizeof fpexe, "ffprobe");
     snprintf(cmd, sizeof cmd,
-             "ffprobe -v error -show_entries format_tags=%s "
-             "-of default=noprint_wrappers=1 \"%s\"", key, path);
+             "\"%s\" -v error -show_entries format_tags=%s "
+             "-of default=noprint_wrappers=1 \"%s\"", fpexe, key, path);
     FILE *fp = popen(cmd, "r");
     if (!fp) return NULL;
     char line[4096];
@@ -238,7 +241,9 @@ char *ffprobe_tag(const char *path, const char *key)
         char *eq = strchr(line, '=');
         if (!eq) continue;
         *eq = '\0';
-        if (strcmp(line, key) == 0) {
+        char *k = line;                       /* ffprobe prints "TAG:key=value" */
+        if (strncasecmp(k, "TAG:", 4) == 0) k += 4;
+        if (strcasecmp(k, key) == 0) {
             size_t l2 = strlen(eq + 1);
             while (l2 && (eq[1 + l2 - 1] == '\n' || eq[1 + l2 - 1] == '\r'))
                 l2--;

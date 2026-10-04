@@ -39,6 +39,8 @@ void usage(FILE *f)
             "                 (auto: float sources stay float32, lossless)\n"
             "  -pretty        readable JSON (indent + CRLF); default: compact\n"
             "  -minimal       compact + omit redundant event keys (experimental)\n"
+            "  -ffmpeg PATH   ffmpeg/ffprobe to use: a directory or the binary\n"
+            "                 (default: PATH; env ADOFAI_FFMPEG works too)\n"
             "  -threads N     codec threads; 0 = auto (default)\n"
             "  -slice MB      bench chart text slice; default 256\n"
             "  -full          bench the whole chart text\n"
@@ -139,6 +141,8 @@ int main(int argc, char **argv)
             encflags |= ENC_PRETTY;
         } else if (!strcmp(o, "minimal")) {
             encflags |= ENC_MINIMAL;
+        } else if (!strcmp(o, "ffmpeg") && i + 1 < argc) {
+            ffmpeg_set_dir(argv[++i]);
         } else if (!strcmp(o, "threads") && i + 1 < argc) {
             const char *v = argv[++i];
             char *end = NULL;
@@ -182,7 +186,11 @@ int main(int argc, char **argv)
     ops = nshow + nplay + nverify + nbench + nselftest;
     if (ops > 1) die("pick only one of -show/-play/-verify/-bench/-self-test");
 
+    const char *ffenv = getenv("ADOFAI_FFMPEG");
+    if (ffenv && *ffenv && !ffmpeg_dir[0]) ffmpeg_set_dir(ffenv);
+
     if (banner) log_msg(1, "adofai-music %s\n", VERSION);
+    if (ffmpeg_dir[0]) log_verbose("ffmpeg: %s/ffmpeg\n", ffmpeg_dir);
 
     if (nselftest) {
         log_verbose("operation: self-test\n");

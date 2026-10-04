@@ -21,6 +21,7 @@
 #include "cli.h"
 #include "chart.h"
 #include "pcm.h"
+#include "ogg.h"
 #include "xz.h"
 #include "zstd.h"
 
@@ -187,12 +188,13 @@ int encode_cmd(const char *input, const char *outpath,
     char title[512] = {0}, artist[512] = {0};
     if (title_opt) snprintf(title, sizeof title, "%s", title_opt);
     if (artist_opt) snprintf(artist, sizeof artist, "%s", artist_opt);
+    int ogg = !title[0] || !artist[0] ? ogg_sniff(input) : 0;
     if (!title[0]) {
-        char *t = ffprobe_tag(input, "title");
+        char *t = ogg ? ogg_tag(input, "TITLE") : ffprobe_tag(input, "title");
         if (t) { snprintf(title, sizeof title, "%s", t); free(t); }
     }
     if (!artist[0]) {
-        char *a = ffprobe_tag(input, "artist");
+        char *a = ogg ? ogg_tag(input, "ARTIST") : ffprobe_tag(input, "artist");
         if (a) { snprintf(artist, sizeof artist, "%s", a); free(a); }
     }
 

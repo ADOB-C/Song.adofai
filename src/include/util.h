@@ -29,6 +29,11 @@ void log_msg(int level, const char *fmt, ...);
 #define log_info(...)    log_msg(1, __VA_ARGS__)
 #define log_verbose(...) log_msg(2, __VA_ARGS__)
 
+/* where to find ffmpeg/ffprobe: empty = search PATH */
+extern char ffmpeg_dir[MAX_PATH_LEN];
+void ffmpeg_set_dir(const char *path);          /* dir or ffmpeg binary; dies if unusable */
+void tool_path(char *out, size_t outsz, const char *name);   /* -> dir/name or name */
+
 /* codec threading: 0 = auto (all CPUs), N > 0 = cap */
 extern int thread_count;
 unsigned codec_threads(void);

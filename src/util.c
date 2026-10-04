@@ -56,6 +56,38 @@ void log_msg(int level, const char *fmt, ...)
     va_end(ap);
 }
 
+char ffmpeg_dir[MAX_PATH_LEN];
+
+void ffmpeg_set_dir(const char *path)
+{
+    struct stat st;
+    if (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
+        snprintf(ffmpeg_dir, sizeof ffmpeg_dir, "%s", path);
+    } else {
+        const char *slash = strrchr(path, '/');
+        if (!slash) snprintf(ffmpeg_dir, sizeof ffmpeg_dir, ".");
+        else if (slash == path) snprintf(ffmpeg_dir, sizeof ffmpeg_dir, "/");
+        else {
+            size_t l = (size_t)(slash - path);
+            if (l >= sizeof ffmpeg_dir) l = sizeof ffmpeg_dir - 1;
+            memcpy(ffmpeg_dir, path, l);
+            ffmpeg_dir[l] = '\0';
+        }
+    }
+    size_t dl = strlen(ffmpeg_dir);
+    while (dl > 1 && ffmpeg_dir[dl - 1] == '/') ffmpeg_dir[--dl] = '\0';
+    char probe[MAX_PATH_LEN + 16];
+    snprintf(probe, sizeof probe, "%s/ffmpeg", ffmpeg_dir);
+    if (access(probe, X_OK) != 0)
+        die("no executable ffmpeg at %s (pass a directory or the ffmpeg binary)", probe);
+}
+
+void tool_path(char *out, size_t outsz, const char *name)
+{
+    if (ffmpeg_dir[0]) snprintf(out, outsz, "%s/%s", ffmpeg_dir, name);
+    else snprintf(out, outsz, "%s", name);
+}
+
 int thread_count = 0;
 
 unsigned codec_threads(void)
