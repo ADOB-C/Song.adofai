@@ -33,6 +33,10 @@ void log_msg(int level, const char *fmt, ...);
 extern int thread_count;
 unsigned codec_threads(void);
 
+/* free bytes on the filesystem holding path (parent dir if it doesn't exist);
+ * 0 = unknown */
+unsigned long long free_bytes(const char *path);
+
 Map map_file(const char *path);   /* plain mmap only */
 Map map_open(const char *path);   /* mmap, or decompress .xz/.zst on the fly */
 void map_close(Map *m);           /* munmap or free per owned; zeroes *m */

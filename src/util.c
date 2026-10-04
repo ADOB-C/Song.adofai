@@ -18,6 +18,7 @@
 #include <strings.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
@@ -62,6 +63,25 @@ unsigned codec_threads(void)
     if (thread_count > 0) return (unsigned)thread_count;
     long n = sysconf(_SC_NPROCESSORS_ONLN);
     return n > 0 ? (unsigned)n : 1;
+}
+
+unsigned long long free_bytes(const char *path)
+{
+    char dir[MAX_PATH_LEN];
+    const char *slash = strrchr(path, '/');
+    if (!slash) {
+        snprintf(dir, sizeof dir, ".");
+    } else if (slash == path) {
+        snprintf(dir, sizeof dir, "/");
+    } else {
+        size_t l = (size_t)(slash - path);
+        if (l >= sizeof dir) l = sizeof dir - 1;
+        memcpy(dir, path, l);
+        dir[l] = '\0';
+    }
+    struct statvfs st;
+    if (statvfs(dir, &st) != 0) return 0;
+    return (unsigned long long)st.f_bavail * (unsigned long long)st.f_frsize;
 }
 
 Map map_file(const char *path)

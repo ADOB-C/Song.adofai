@@ -34,6 +34,11 @@ int decode_cmd(const char *chart, const char *out, double gain)
             a.s[i] = (int16_t)c;
         }
     }
+    unsigned long long need = (unsigned long long)a.total * 2 + 44 + (1u << 20);
+    unsigned long long avail = free_bytes(out);
+    if (avail && need > avail)
+        die("not enough free space for %s: need ~%.1f MB, have %.1f MB",
+            out, need / 1e6, avail / 1e6);
     wav_write(out, a.s, a.total, a.rate);
     printf("decoded %zu samples (%.1f kHz, %.1fs) -> %s in %.1fs\n",
            a.total, a.rate / 1000.0, (double)a.total / a.rate, out, now_s() - t0);
@@ -126,13 +131,38 @@ int encode_cmd(const char *input, const char *outpath,
                  (fmt == OUT_AUTO && !is_xz &&
                   (has_ext(out, ".zst") || has_ext(out, ".zstd")));
     int compressed = is_xz || is_zst;
+
+    /* disk-space guard: estimate the plaintext size from the sample stream
+     * (event line ~<=140 B, angleData 2 B/sample) and refuse up front. */
+    unsigned long long ne_est = 0;
+    for (size_t i = 1; i < p.n; i++)
+        if (p.s[i] != p.s[i - 1]) ne_est++;
+    unsigned long long est = (unsigned long long)p.n * 2 + ne_est * 140 + 4096;
+    unsigned long long need = compressed ? est / 16 + (4u << 20) : est + (1u << 20);
+    unsigned long long avail = free_bytes(out);
+    struct stat ost;
+    if (stat(out, &ost) == 0 && S_ISREG(ost.st_mode))   /* will be truncated */
+        avail += (unsigned long long)ost.st_size;
+    if (avail && need > avail)
+        die("not enough free space for %s: need ~%.2f GB, have %.2f GB%s", out,
+            need / 1e9, avail / 1e9,
+            compressed ? "" : " (or use -f xz / -f zst)");
+    if (!compressed && est > (256ull << 20))
+        log_info("note: plain chart will be ~%.2f GB; -f xz gives ~%.0f MB "
+                 "(keep plain only if ADOFAI needs it)\n",
+                 est / 1e9, (double)est / 1048576.0 / 16.0);
+    log_verbose("estimated plaintext %.2f GB, free %.2f GB\n", est / 1e9, avail / 1e9);
+
     FILE *f = is_xz ? xz_open(out, xz_parse_preset(xzopt))
              : is_zst ? zstd_open(out, zstd_parse_level(zstdopt))
                       : fopen(out, "wb");
     if (!f) die("cannot write %s: %s", out, strerror(errno));
     size_t ne = 0;
     size_t bytes = encode_core(f, p.s, p.n, p.rate, title, artist, &ne);
-    if (fclose(f) != 0) die("write error on %s", out);
+    if (fclose(f) != 0) {
+        remove(out);   /* don't leave a half-written chart behind */
+        die("write error on %s (partial file removed; disk full?)", out);
+    }
 
     double tel = now_s() - t0;
     if (compressed) {

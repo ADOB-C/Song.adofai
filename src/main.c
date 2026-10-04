@@ -1,6 +1,7 @@
 /* CLI entry point: ffmpeg-style argument parsing + usage - see README.md */
 #define _POSIX_C_SOURCE 200809L
 #include <errno.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -83,6 +84,9 @@ static int parse_loglevel(const char *v)
 int main(int argc, char **argv)
 {
     const char *in = NULL, *out = NULL;
+#ifdef SIGXFSZ
+    signal(SIGXFSZ, SIG_IGN);   /* write() should return EFBIG so we can clean up */
+#endif
     char *song = NULL, *artist = NULL;
     const char *xzopt = NULL, *zstdopt = NULL, *verify_ref = NULL;
     double gain = 1.0;
