@@ -20,9 +20,9 @@
 void usage(FILE *f)
 {
     fprintf(f,
-            "adofai-audio %s - lossless audio <-> .adofai \"audio-as-chart\" codec\n"
+            "adofai-music %s - lossless audio <-> .adofai \"audio-as-chart\" codec\n"
             "\n"
-            "usage: adofai-audio <command> [options]\n"
+            "usage: adofai-music <command> [options]\n"
             "\n"
             "commands:\n"
             "  encode INPUT [OUT]   audio -> .adofai (v2 change-event layout);\n"
@@ -73,7 +73,7 @@ int main(int argc, char **argv)
             usage(stdout);
             return 0;
         } else if (strcmp(a, "--version") == 0) {
-            printf("adofai-audio %s\n", VERSION);
+            printf("adofai-music %s\n", VERSION);
             return 0;
         } else if (strcmp(a, "--artist") == 0 && i + 1 < argc) {
             artist = argv[++i];

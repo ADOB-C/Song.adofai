@@ -7,16 +7,16 @@
 ## 快速开始
 
 ```sh
-make                       # → ./build/adofai-audio
+make                       # → ./build/adofai-music
 make test                  # 纯内存自检（不写盘）
 
-./build/adofai-audio encode in.m4a out.adofai --title "Unity" --artist "TheFatRat"
-./build/adofai-audio encode in.wav out.adofai.xz    # .xz（或 .zst）边编码边压缩
-./build/adofai-audio play   out.adofai.xz --gain 0.5
-./build/adofai-audio decode out.adofai.xz back.wav
-./build/adofai-audio verify out.adofai.xz in.m4a
-./build/adofai-audio info   out.adofai.xz
-./build/adofai-audio bench  out.adofai.xz           # 压缩档位对比（零落盘）
+./build/adofai-music encode in.m4a out.adofai --title "Unity" --artist "TheFatRat"
+./build/adofai-music encode in.wav out.adofai.xz    # .xz（或 .zst）边编码边压缩
+./build/adofai-music play   out.adofai.xz --gain 0.5
+./build/adofai-music decode out.adofai.xz back.wav
+./build/adofai-music verify out.adofai.xz in.m4a
+./build/adofai-music info   out.adofai.xz
+./build/adofai-music bench  out.adofai.xz           # 压缩档位对比（零落盘）
 ```
 
 `decode / play / verify / info` 按内容自动识别明文 `.adofai`、`.xz`、`.zst`。

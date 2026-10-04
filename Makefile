@@ -26,7 +26,7 @@ endif
 CFLAGS  += $(LZMA_CFLAGS) $(ZSTD_CFLAGS)
 LDLIBS  += $(LZMA_LIBS) $(ZSTD_LIBS) $(AUDIO_LIBS)
 
-BIN      = build/adofai-audio
+BIN      = build/adofai-music
 SRCS     = src/util.c src/chart.c src/pcm.c src/codec.c src/xz.c src/zstd.c \
            src/commands.c src/bench.c src/play.c src/main.c
 HDRS     = src/include/util.h src/include/chart.h src/include/pcm.h src/include/codec.h \
@@ -50,6 +50,6 @@ test: $(BIN)
 	./$(BIN) self-test
 
 install: $(BIN)
-	install -m 0755 $(BIN) /usr/local/bin/adofai-audio
+	install -m 0755 $(BIN) /usr/local/bin/adofai-music
 
 .PHONY: all clean test install
