@@ -11,7 +11,7 @@
 
 int encode_cmd(const char *input, const char *outpath,
               const char *title_opt, const char *artist_opt,
-              const char *xzopt, const char *zstdopt, int fmt);
+              const char *xzopt, const char *zstdopt, int fmt, unsigned encflags);
 int decode_cmd(const char *chart, const char *out, double gain);
 int play_cmd(const char *chart, double gain);
 int verify_cmd(const char *chart, const char *ref);

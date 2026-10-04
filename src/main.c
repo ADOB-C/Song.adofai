@@ -35,6 +35,8 @@ void usage(FILE *f)
             "  -gain F        decode/play gain (1.0 = bit-exact)\n"
             "  -f FORMAT      force output format: adofai | xz | zst | wav\n"
             "                 (default: inferred from the output extension)\n"
+            "  -pretty        readable JSON (indent + CRLF); default: compact\n"
+            "  -minimal       compact + omit redundant event keys (experimental)\n"
             "  -threads N     codec threads; 0 = auto (default)\n"
             "  -slice MB      bench chart text slice; default 256\n"
             "  -full          bench the whole chart text\n"
@@ -93,6 +95,7 @@ int main(int argc, char **argv)
     long slice_mb = 256;
     int full = 0, force = 0, banner = 1;
     int have_fmt = 0, fmt_decode = 0, outfmt = OUT_AUTO;
+    unsigned encflags = 0;
     int ops = 0, nplay = 0, nverify = 0, nbench = 0, nselftest = 0, nshow = 0;
 
     for (int i = 1; i < argc; i++) {
@@ -122,6 +125,10 @@ int main(int argc, char **argv)
             else if (!strcasecmp(v, "xz")) outfmt = OUT_XZ;
             else if (!strcasecmp(v, "zst") || !strcasecmp(v, "zstd")) outfmt = OUT_ZSTD;
             else die("unknown -f format: %s (adofai | xz | zst | wav)", v);
+        } else if (!strcmp(o, "pretty")) {
+            encflags |= ENC_PRETTY;
+        } else if (!strcmp(o, "minimal")) {
+            encflags |= ENC_MINIMAL;
         } else if (!strcmp(o, "threads") && i + 1 < argc) {
             const char *v = argv[++i];
             char *end = NULL;
@@ -214,5 +221,5 @@ int main(int argc, char **argv)
         return decode_cmd(in, out, gain);
     }
     log_verbose("operation: encode (audio -> chart), threads %u\n", codec_threads());
-    return encode_cmd(in, out, song, artist, xzopt, zstdopt, outfmt);
+    return encode_cmd(in, out, song, artist, xzopt, zstdopt, outfmt, encflags);
 }

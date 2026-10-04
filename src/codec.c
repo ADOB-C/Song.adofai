@@ -113,8 +113,10 @@ static size_t wch(FILE *f, int c) { fputc(c, f); return 1; }
 
 size_t encode_core(FILE *f, const int16_t *s, size_t n, int rate,
                            const char *title, const char *artist,
-                           size_t *events_out)
+                           size_t *events_out, unsigned flags)
 {
+    int pretty = (flags & ENC_PRETTY) != 0;
+    int minimal = (flags & ENC_MINIMAL) != 0;
     size_t max_events = n > 1 ? n - 1 : 0;
     int64_t *efloor = malloc((max_events ? max_events : 1) * sizeof *efloor);
     int16_t *esamp = malloc((max_events ? max_events : 1) * 2);
@@ -138,7 +140,7 @@ size_t encode_core(FILE *f, const int16_t *s, size_t n, int rate,
     size_t nw = 0;                       /* bytes written (== plaintext size) */
 
     /* angleData: one single dense line of n zeros */
-    nw += wstr(f, "{\r\n\t\"angleData\": [");
+    nw += wstr(f, pretty ? "{\r\n\t\"angleData\": [" : "{\"angleData\":[");
     {
         const size_t K = 4096;
         char *seg = malloc(K * 2);
@@ -165,7 +167,8 @@ size_t encode_core(FILE *f, const int16_t *s, size_t n, int rate,
     }
 
     char setb[4096];
-    int sl = snprintf(setb, sizeof setb,
+    int sl = pretty
+        ? snprintf(setb, sizeof setb,
             "],\r\n"
             "\t\"settings\": {\r\n"
             "\t\t\"version\": 13,\r\n"
@@ -178,6 +181,11 @@ size_t encode_core(FILE *f, const int16_t *s, size_t n, int rate,
             "\t\t\"offset\": 0\r\n"
             "\t},\r\n"
             "\t\"actions\": [\r\n",
+            rate * 60, eartist, etitle, AUTHOR_JSON, v0)
+        : snprintf(setb, sizeof setb,
+            "],\"settings\":{\"version\":13,\"bpm\":%d,\"artist\":\"%s\",\"song\":\"%s\","
+            "\"author\":%s,\"hitsound\":\"Kick\",\"hitsoundVolume\":%s,\"offset\":0},"
+            "\"actions\":[",
             rate * 60, eartist, etitle, AUTHOR_JSON, v0);
     if (sl < 0 || (size_t)sl >= sizeof setb) die("settings block overflow");
     nw += wput(f, setb, (size_t)sl);
@@ -189,12 +197,23 @@ size_t encode_core(FILE *f, const int16_t *s, size_t n, int rate,
         char line[512];
         for (size_t i = 0; i < ne; i++) {
             char vs[32];
-            volstr(esamp[i], vs, sizeof vs);
-            int ln = snprintf(line, sizeof line,
-                              "\t\t{ \"floor\": %lld, \"eventType\": \"SetHitsound\", "
-                              "\"gameSound\": \"Hitsound\", \"hitsound\": \"Kick\", "
-                              "\"hitsoundVolume\": %s },\r\n",
-                              (long long)efloor[i], vs);
+            volstr(esamp[i], vs, sizeof vs);   /* exact dyadic value, no precision loss */
+            const char *fmt;
+            if (pretty && minimal)
+                fmt = "\t\t{ \"floor\": %lld, \"eventType\": \"SetHitsound\", "
+                      "\"hitsoundVolume\": %s },\r\n";
+            else if (pretty)
+                fmt = "\t\t{ \"floor\": %lld, \"eventType\": \"SetHitsound\", "
+                      "\"gameSound\": \"Hitsound\", \"hitsound\": \"Kick\", "
+                      "\"hitsoundVolume\": %s },\r\n";
+            else if (minimal)
+                fmt = "{\"floor\":%lld,\"eventType\":\"SetHitsound\","
+                      "\"hitsoundVolume\":%s},";
+            else
+                fmt = "{\"floor\":%lld,\"eventType\":\"SetHitsound\","
+                      "\"gameSound\":\"Hitsound\",\"hitsound\":\"Kick\","
+                      "\"hitsoundVolume\":%s},";
+            int ln = snprintf(line, sizeof line, fmt, (long long)efloor[i], vs);
             if (bl + (size_t)ln + 1 > (1 << 20)) {
                 nw += wput(f, buf, bl);
                 bl = 0;
@@ -205,7 +224,7 @@ size_t encode_core(FILE *f, const int16_t *s, size_t n, int rate,
         nw += wput(f, buf, bl);
         free(buf);
     }
-    nw += wstr(f, "\t]\r\n}\r\n");
+    nw += wstr(f, pretty ? "\t]\r\n}\r\n" : "]}");
     free(efloor);
     free(esamp);
     if (events_out) *events_out = ne;

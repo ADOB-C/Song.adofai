@@ -106,7 +106,8 @@ static int has_ext(const char *s, const char *ext)
 
 int encode_cmd(const char *input, const char *outpath,
                       const char *title_opt, const char *artist_opt,
-                      const char *xzopt, const char *zstdopt, int fmt)
+                      const char *xzopt, const char *zstdopt, int fmt,
+                      unsigned encflags)
 {
     double t0 = now_s();
     Pcm p = pcm_load(input);
@@ -158,7 +159,7 @@ int encode_cmd(const char *input, const char *outpath,
                       : fopen(out, "wb");
     if (!f) die("cannot write %s: %s", out, strerror(errno));
     size_t ne = 0;
-    size_t bytes = encode_core(f, p.s, p.n, p.rate, title, artist, &ne);
+    size_t bytes = encode_core(f, p.s, p.n, p.rate, title, artist, &ne, encflags);
     if (fclose(f) != 0) {
         remove(out);   /* don't leave a half-written chart behind */
         die("write error on %s (partial file removed; disk full?)", out);
@@ -202,33 +203,38 @@ int selftest_cmd(void)
         tone[i] = (int16_t)lround(v);
     }
 
-    char *cbuf = NULL;
-    size_t csize = 0;
-    FILE *mf = open_memstream(&cbuf, &csize);
-    if (!mf) die("open_memstream failed");
-    size_t ne = 0;
-    encode_core(mf, tone, (size_t)n, rate, "Tone Test", "Artist", &ne);
-    fclose(mf);
+    /* roundtrip every writer layout (compact / pretty / minimal) */
+    static const unsigned layouts[] = { 0, ENC_PRETTY, ENC_MINIMAL };
+    static const char *names[] = { "compact", "pretty", "minimal" };
+    int rc = 0;
+    for (size_t L = 0; L < sizeof layouts / sizeof layouts[0]; L++) {
+        char *cbuf = NULL;
+        size_t csize = 0;
+        FILE *mf = open_memstream(&cbuf, &csize);
+        if (!mf) die("open_memstream failed");
+        size_t ne = 0;
+        encode_core(mf, tone, (size_t)n, rate, "Tone Test", "Artist", &ne, layouts[L]);
+        fclose(mf);
 
-    Map m = { (const unsigned char *)cbuf, csize, 0, 0, 0 };
-    Audio a = audio_decode_map(&m);
-    int rc;
-    if (a.total != (size_t)n) {
-        printf("self-test: length %zu != %d\n", a.total, n);
-        rc = 1;
-    } else {
-        size_t mism = 0;
-        for (size_t i = 0; i < a.total; i++)
-            if (a.s[i] != tone[i]) mism++;
-        printf(mism == 0 ? "SELF-TEST PASSED (in-memory, %zu samples)\n"
-                         : "SELF-TEST FAILED: %zu mismatches\n",
-               mism == 0 ? a.total : mism);
-        rc = mism == 0 ? 0 : 1;
+        Map m = { (const unsigned char *)cbuf, csize, 0, 0, 0 };
+        Audio a = audio_decode_map(&m);
+        if (a.total != (size_t)n) {
+            printf("self-test: %s length %zu != %d\n", names[L], a.total, n);
+            rc = 1;
+        } else {
+            size_t mism = 0;
+            for (size_t i = 0; i < a.total; i++)
+                if (a.s[i] != tone[i]) mism++;
+            printf("SELF-TEST %s: %s (%zu samples, %zu B)\n",
+                   mism == 0 ? "PASSED" : "FAILED", names[L],
+                   mism == 0 ? a.total : mism, csize);
+            if (mism) rc = 1;
+        }
+        free(a.s);
+        free(cbuf);
+        (void)ne;
     }
-    free(a.s);
-    free(cbuf);
     free(tone);
-    (void)ne;
     return rc;
 }
 

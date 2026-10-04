@@ -11,6 +11,10 @@
   `Song.adofai (https://github.com/CHT-1192/Song.adofai)`。
 - 解码兼容旧版/第三方全事件谱（自动判别：settings 音量 ≤50 = v2；=100 = 旧版）。
 
+写出布局：默认紧凑（无缩进/换行/多余空格）；`-pretty` 为带缩进的旧布局；
+`-minimal` 省略事件里冗余的 `gameSound`/`hitsound` 键（仅保留 `floor` /
+`eventType` / `hitsoundVolume`，音量仍是精确的 dyadic 小数，实验性）。
+
 解析器为锚点扫描（`SetHitsound` 定位 + 对象边界内取 floor/hitsoundVolume），
 无完整 JSON DOM，1.5 GB 谱面秒级扫描。
 
