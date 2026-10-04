@@ -32,6 +32,9 @@ void usage(FILE *f)
             "  -xz-level L    xz preset 0-9 (optionally 9e); default 6 (9e = smallest)\n"
             "  -zstd-level L  zstd level 1-22; default 19 (3 = fastest)\n"
             "  -gain F        decode/play gain (1.0 = bit-exact)\n"
+            "  -f FORMAT      force output format: adofai | xz | zst | wav\n"
+            "                 (default: inferred from the output extension)\n"
+            "  -threads N     codec threads; 0 = auto (default)\n"
             "  -slice MB      bench chart text slice; default 256\n"
             "  -full          bench the whole chart text\n"
             "  -y / -n        overwrite output / never overwrite (default: -n)\n"
@@ -85,6 +88,7 @@ int main(int argc, char **argv)
     double gain = 1.0;
     long slice_mb = 256;
     int full = 0, force = 0, banner = 1;
+    int have_fmt = 0, fmt_decode = 0, outfmt = OUT_AUTO;
     int ops = 0, nplay = 0, nverify = 0, nbench = 0, nselftest = 0, nshow = 0;
 
     for (int i = 1; i < argc; i++) {
@@ -106,6 +110,21 @@ int main(int argc, char **argv)
             zstdopt = argv[++i];
         } else if (!strcmp(o, "gain") && i + 1 < argc) {
             gain = atof(argv[++i]);
+        } else if (!strcmp(o, "f") && i + 1 < argc) {
+            const char *v = argv[++i];
+            have_fmt = 1;
+            if (!strcasecmp(v, "wav")) fmt_decode = 1;
+            else if (!strcasecmp(v, "adofai")) outfmt = OUT_PLAIN;
+            else if (!strcasecmp(v, "xz")) outfmt = OUT_XZ;
+            else if (!strcasecmp(v, "zst") || !strcasecmp(v, "zstd")) outfmt = OUT_ZSTD;
+            else die("unknown -f format: %s (adofai | xz | zst | wav)", v);
+        } else if (!strcmp(o, "threads") && i + 1 < argc) {
+            const char *v = argv[++i];
+            char *end = NULL;
+            long n = strtol(v, &end, 10);
+            if (v[0] == '\0' || end == v || *end != '\0' || n < 0 || n > 1024)
+                die("bad -threads '%s' (0 = auto, or 1..1024)", v);
+            thread_count = (int)n;
         } else if (!strcmp(o, "slice") && i + 1 < argc) {
             slice_mb = atol(argv[++i]);
         } else if (!strcmp(o, "full")) {
@@ -172,18 +191,24 @@ int main(int argc, char **argv)
 
     if (!out) die("no output: add OUTPUT, or use -show/-play/-verify/-bench");
 
-    int decode = ends_with(out, ".wav");
-    int encode = !decode && (ends_with(out, ".adofai") || ends_with(out, ".xz") ||
-                             ends_with(out, ".zst") || ends_with(out, ".zstd"));
-    if (!decode && !encode)
-        die("unknown output format: %s (use .adofai/.xz/.zst, or .wav)", out);
+    int decode;
+    if (have_fmt) {
+        decode = fmt_decode;
+    } else {
+        decode = ends_with(out, ".wav");
+        int encode = !decode && (ends_with(out, ".adofai") || ends_with(out, ".xz") ||
+                                 ends_with(out, ".zst") || ends_with(out, ".zstd"));
+        if (!decode && !encode)
+            die("unknown output format: %s (use .adofai/.xz/.zst, or .wav; or -f)", out);
+    }
     if (!force && access(out, F_OK) == 0)
         die("output %s exists; add -y to overwrite", out);
 
     if (decode) {
-        log_verbose("operation: decode (chart -> wav), gain %.2f\n", gain);
+        log_verbose("operation: decode (chart -> wav), gain %.2f, threads %u\n",
+                    gain, codec_threads());
         return decode_cmd(in, out, gain);
     }
-    log_verbose("operation: encode (audio -> chart)\n");
-    return encode_cmd(in, out, song, artist, xzopt, zstdopt);
+    log_verbose("operation: encode (audio -> chart), threads %u\n", codec_threads());
+    return encode_cmd(in, out, song, artist, xzopt, zstdopt, outfmt);
 }

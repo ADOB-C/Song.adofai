@@ -55,6 +55,15 @@ void log_msg(int level, const char *fmt, ...)
     va_end(ap);
 }
 
+int thread_count = 0;
+
+unsigned codec_threads(void)
+{
+    if (thread_count > 0) return (unsigned)thread_count;
+    long n = sysconf(_SC_NPROCESSORS_ONLN);
+    return n > 0 ? (unsigned)n : 1;
+}
+
 Map map_file(const char *path)
 {
     Map m = {0};

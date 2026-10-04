@@ -1,6 +1,6 @@
 # 压缩基准与默认档
 
-`adofai-music -i CHART -bench [-slice MB] [-full]`：读入谱面（明文/.xz/.zst 均可），在内存里对
+`adofai-music -i CHART -bench [-slice MB] [-full] [-threads N]`：读入谱面（明文/.xz/.zst 均可），在内存里对
 各档位压缩→解压→比字节，并按谱面自身的「文本字节/音频秒」外推 3 分钟体积、与
 100 MB 预算比对。**全程零落盘**；默认取文本中段 256 MiB（= 4 个 64 MiB block，
 MT 才真正跑起来）。

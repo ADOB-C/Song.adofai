@@ -28,7 +28,7 @@ static lzma_ret dec_init(lzma_stream *s)
     lzma_mt mt;
     memset(&mt, 0, sizeof mt);
     mt.flags = LZMA_CONCATENATED;
-    mt.threads = lzma_cputhreads();
+    mt.threads = codec_threads();
     if (mt.threads == 0) mt.threads = 1;
 #if LZMA_VERSION >= 50060000
     mt.memlimit_threading = UINT64_MAX;
@@ -146,7 +146,7 @@ FILE *xz_open(const char *path, uint32_t preset)
 #if LZMA_VERSION >= 50040000
     lzma_mt mt;
     memset(&mt, 0, sizeof mt);
-    mt.threads = lzma_cputhreads();
+    mt.threads = codec_threads();
     if (mt.threads == 0) mt.threads = 1;
     mt.block_size = 64u << 20;   /* same shape as `xz -T0 --block-size=64MiB` */
     mt.preset = preset;

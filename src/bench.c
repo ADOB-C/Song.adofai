@@ -1,17 +1,10 @@
 /* compression benchmark: per-preset ratio/speed + roundtrip, in memory only */
-#if defined(__APPLE__)
-#define _DARWIN_C_SOURCE            /* _SC_NPROCESSORS_ONLN */
-#endif
-#if defined(__linux__)
-#define _GNU_SOURCE
-#endif
 #define _POSIX_C_SOURCE 200809L
 #include <lzma.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <zstd.h>
 
 #include "cli.h"
@@ -37,17 +30,6 @@ static void buf_put(Buf *b, const void *src, size_t n)
     b->n += n;
 }
 
-static unsigned cpus(void)
-{
-#if LZMA_VERSION >= 50040000
-    unsigned n = lzma_cputhreads();
-    return n ? n : 1;
-#else
-    long n = sysconf(_SC_NPROCESSORS_ONLN);
-    return n > 0 ? (unsigned)n : 1;
-#endif
-}
-
 static int xz_enc(const unsigned char *in, size_t n, uint32_t preset, Buf *out)
 {
     lzma_stream s = LZMA_STREAM_INIT;
@@ -55,7 +37,7 @@ static int xz_enc(const unsigned char *in, size_t n, uint32_t preset, Buf *out)
 #if LZMA_VERSION >= 50040000
     lzma_mt mt;
     memset(&mt, 0, sizeof mt);
-    mt.threads = cpus();
+    mt.threads = codec_threads();
     mt.block_size = XZ_BLOCK;
     mt.preset = preset;
     mt.check = LZMA_CHECK_CRC64;
@@ -88,7 +70,7 @@ static int zstd_enc(const unsigned char *in, size_t n, int level, Buf *out)
     size_t r = ZSTD_CCtx_setParameter(c, ZSTD_c_compressionLevel, level);
     if (!ZSTD_isError(r)) r = ZSTD_CCtx_setParameter(c, ZSTD_c_checksumFlag, 1);
     if (ZSTD_isError(r)) { ZSTD_freeCCtx(c); return -1; }
-    if (cpus() > 1) (void)ZSTD_CCtx_setParameter(c, ZSTD_c_nbWorkers, (int)cpus());
+    if (codec_threads() > 1) (void)ZSTD_CCtx_setParameter(c, ZSTD_c_nbWorkers, (int)codec_threads());
     unsigned char ob[1 << 16];
     ZSTD_inBuffer ib = { in, n, 0 };
     for (;;) {
@@ -111,7 +93,7 @@ static int xz_dec(const unsigned char *in, size_t n, unsigned char *out, size_t 
     lzma_mt mt;
     memset(&mt, 0, sizeof mt);
     mt.flags = LZMA_CONCATENATED;
-    mt.threads = cpus();
+    mt.threads = codec_threads();
 #if LZMA_VERSION >= 50060000
     mt.memlimit_threading = UINT64_MAX;
     mt.memlimit_stop = UINT64_MAX;
@@ -185,7 +167,7 @@ int bench_cmd(const char *chart, long slice_mb, int full)
 
     printf("bench: %s\n", chart);
     printf("  text %.3f GB, %.1f s @ %.1f Hz, %u threads\n",
-           m.n / 1e9, dur, rate, cpus());
+           m.n / 1e9, dur, rate, codec_threads());
     if (off || n != m.n)
         printf("  slice %.0f MiB (%u x %u MiB xz blocks) at %.0f%% of text\n",
                n / 1048576.0, (unsigned)((n + XZ_BLOCK - 1) / XZ_BLOCK),

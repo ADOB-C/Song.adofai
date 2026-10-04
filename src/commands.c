@@ -93,9 +93,15 @@ int info_cmd(const char *chart)
     return 0;
 }
 
+static int has_ext(const char *s, const char *ext)
+{
+    size_t ls = strlen(s), le = strlen(ext);
+    return ls >= le && strcasecmp(s + ls - le, ext) == 0;
+}
+
 int encode_cmd(const char *input, const char *outpath,
                       const char *title_opt, const char *artist_opt,
-                      const char *xzopt, const char *zstdopt)
+                      const char *xzopt, const char *zstdopt, int fmt)
 {
     double t0 = now_s();
     Pcm p = pcm_load(input);
@@ -115,10 +121,10 @@ int encode_cmd(const char *input, const char *outpath,
     char out[MAX_PATH_LEN];
     snprintf(out, sizeof out, "%s", outpath);
 
-    size_t l = strlen(out);
-    int is_xz = l >= 3 && strcasecmp(out + l - 3, ".xz") == 0;
-    int is_zst = !is_xz && ((l >= 4 && strcasecmp(out + l - 4, ".zst") == 0) ||
-                            (l >= 5 && strcasecmp(out + l - 5, ".zstd") == 0));
+    int is_xz = fmt == OUT_XZ || (fmt == OUT_AUTO && has_ext(out, ".xz"));
+    int is_zst = fmt == OUT_ZSTD ||
+                 (fmt == OUT_AUTO && !is_xz &&
+                  (has_ext(out, ".zst") || has_ext(out, ".zstd")));
     int compressed = is_xz || is_zst;
     FILE *f = is_xz ? xz_open(out, xz_parse_preset(xzopt))
              : is_zst ? zstd_open(out, zstd_parse_level(zstdopt))

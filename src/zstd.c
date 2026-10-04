@@ -1,10 +1,4 @@
 /* libzstd glue: chart <-> .zst — see README.md */
-#if defined(__APPLE__)
-#define _DARWIN_C_SOURCE            /* _SC_NPROCESSORS_ONLN */
-#endif
-#if defined(__linux__)
-#define _GNU_SOURCE
-#endif
 #define _POSIX_C_SOURCE 200809L
 #include <errno.h>
 #include <stdint.h>
@@ -12,7 +6,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <unistd.h>
 #include <zstd.h>       /* official libzstd, found via -I */
 
 #include "zstd.h"       /* this module's interface, found via -iquote src/include */
@@ -125,9 +118,8 @@ FILE *zstd_open(const char *path, int level)
     size_t r = ZSTD_CCtx_setParameter(z->c, ZSTD_c_compressionLevel, level);
     if (!ZSTD_isError(r)) r = ZSTD_CCtx_setParameter(z->c, ZSTD_c_checksumFlag, 1);
     if (ZSTD_isError(r)) die("zstd encoder setup failed: %s", ZSTD_getErrorName(r));
-    long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
-    if (ncpu > 1)   /* ignore failure: single-thread-only builds stay valid */
-        (void)ZSTD_CCtx_setParameter(z->c, ZSTD_c_nbWorkers, (int)ncpu);
+    if (codec_threads() > 1)   /* ignore failure: single-thread-only builds stay valid */
+        (void)ZSTD_CCtx_setParameter(z->c, ZSTD_c_nbWorkers, (int)codec_threads());
     return cookie_wopen(path, z, zw, zf);
 }
 

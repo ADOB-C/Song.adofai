@@ -29,6 +29,10 @@ void log_msg(int level, const char *fmt, ...);
 #define log_info(...)    log_msg(1, __VA_ARGS__)
 #define log_verbose(...) log_msg(2, __VA_ARGS__)
 
+/* codec threading: 0 = auto (all CPUs), N > 0 = cap */
+extern int thread_count;
+unsigned codec_threads(void);
+
 Map map_file(const char *path);   /* plain mmap only */
 Map map_open(const char *path);   /* mmap, or decompress .xz/.zst on the fly */
 void map_close(Map *m);           /* munmap or free per owned; zeroes *m */

@@ -6,8 +6,9 @@
 
 ## 快速开始
 
-语法仿 ffmpeg：`-i` 标输入、位置参数是输出、输出扩展名决定格式，另有
-`-y/-n`、`-loglevel quiet|info|verbose`、`-hide_banner`。
+语法仿 ffmpeg：`-i` 标输入、位置参数是输出、输出扩展名决定格式；`-f` 可强制格式
+（`adofai`/`xz`/`zst`/`wav`），另有 `-threads N`（0=auto）、`-y/-n`、
+`-loglevel quiet|info|verbose`、`-hide_banner`。
 
 ```sh
 make                       # → ./build/adofai-music
@@ -15,6 +16,7 @@ make test                  # 纯内存自检（不写盘）
 
 ./build/adofai-music -i in.m4a -metadata song="Unity" -metadata artist="TheFatRat" out.adofai
 ./build/adofai-music -i in.wav out.adofai.xz     # .xz（或 .zst）边编码边压缩
+./build/adofai-music -i in.wav -f xz -threads 4 chart.bin   # 扩展名无所谓，-f 说了算
 ./build/adofai-music -i out.adofai.xz back.wav   # 谱面 → WAV
 ./build/adofai-music -i out.adofai.xz -play -gain 0.5
 ./build/adofai-music -i out.adofai.xz -verify in.m4a
