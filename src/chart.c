@@ -180,6 +180,18 @@ void scan_events(const Map *m, Events *ev)
     }
 }
 
+int chart_codec_f32(const Map *m)
+{
+    size_t win = m->n < (1u << 29) ? m->n : (1u << 29);
+    const unsigned char *a = findb(m->p, win, "\"actions\"", 9);
+    if (!a) return -1;
+    size_t rest = m->n - (size_t)(a - m->p);
+    size_t lim = rest < 4096 ? rest : 4096;   /* marker is the first action */
+    if (findb(a, lim, "\"adofai-music:f32\"", 18)) return 1;
+    if (findb(a, lim, "\"adofai-music:s16\"", 18)) return 0;
+    return -1;
+}
+
 void chart_stream_info(const Map *m, size_t *samples, double *rate)
 {
     Meta meta;
@@ -188,9 +200,12 @@ void chart_stream_info(const Map *m, size_t *samples, double *rate)
     Events ev = {0};
     scan_events(m, &ev);
     int64_t last_floor = ev.n ? ev.floor[ev.n - 1] : 0;
-    size_t base = (meta.has_vol && fabs(meta.vol) <= 50.0 && entries > 0)
+    int f32 = chart_codec_f32(m) == 1;
+    size_t base = (f32 && entries > 0)
                       ? (size_t)entries
-                      : (entries > 0 ? (size_t)(entries - 1) : 0);
+                      : (meta.has_vol && fabs(meta.vol) <= 50.0 && entries > 0)
+                            ? (size_t)entries
+                            : (entries > 0 ? (size_t)(entries - 1) : 0);
     *samples = base > (size_t)last_floor ? base : (size_t)last_floor;
     *rate = meta.has_bpm && meta.bpm > 0 ? meta.bpm / 60.0 : 44100.0;
     free(ev.floor);

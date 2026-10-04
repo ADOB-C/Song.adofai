@@ -35,6 +35,8 @@ void usage(FILE *f)
             "  -gain F        decode/play gain (1.0 = bit-exact)\n"
             "  -f FORMAT      force output format: adofai | xz | zst | wav\n"
             "                 (default: inferred from the output extension)\n"
+            "  -sample_fmt F  auto | s16 | f32; encode input/chart & decode output\n"
+            "                 (auto: float sources stay float32, lossless)\n"
             "  -pretty        readable JSON (indent + CRLF); default: compact\n"
             "  -minimal       compact + omit redundant event keys (experimental)\n"
             "  -threads N     codec threads; 0 = auto (default)\n"
@@ -46,8 +48,9 @@ void usage(FILE *f)
             "  -h, -help      show this help\n"
             "  -version       print version\n"
             "\n"
-            "format: bpm = sampleRate*60; hitsoundVolume = int16/655.36;\n"
-            "events only at sample changes; angleData is one dense zero line.\n"
+            "format: bpm = sampleRate*60; int16 charts use hitsoundVolume = int16/655.36;\n"
+            "float32 charts use value*50 with 9 significant digits (lossless) and are\n"
+            "tagged by an EditorComment event. events only at sample changes.\n"
             "show/play/verify/decode detect .xz/.zst by content.\n"
             "ffmpeg/ffprobe are needed only for non-WAV input or tags.\n",
             VERSION);
@@ -96,6 +99,7 @@ int main(int argc, char **argv)
     int full = 0, force = 0, banner = 1;
     int have_fmt = 0, fmt_decode = 0, outfmt = OUT_AUTO;
     unsigned encflags = 0;
+    int sample_fmt = SAMPLE_AUTO;
     int ops = 0, nplay = 0, nverify = 0, nbench = 0, nselftest = 0, nshow = 0;
 
     for (int i = 1; i < argc; i++) {
@@ -125,6 +129,12 @@ int main(int argc, char **argv)
             else if (!strcasecmp(v, "xz")) outfmt = OUT_XZ;
             else if (!strcasecmp(v, "zst") || !strcasecmp(v, "zstd")) outfmt = OUT_ZSTD;
             else die("unknown -f format: %s (adofai | xz | zst | wav)", v);
+        } else if (!strcmp(o, "sample_fmt") && i + 1 < argc) {
+            const char *v = argv[++i];
+            if (!strcasecmp(v, "auto")) sample_fmt = SAMPLE_AUTO;
+            else if (!strcasecmp(v, "s16")) sample_fmt = SAMPLE_S16;
+            else if (!strcasecmp(v, "f32")) sample_fmt = SAMPLE_F32;
+            else die("bad -sample_fmt '%s' (auto | s16 | f32)", v);
         } else if (!strcmp(o, "pretty")) {
             encflags |= ENC_PRETTY;
         } else if (!strcmp(o, "minimal")) {
@@ -218,8 +228,8 @@ int main(int argc, char **argv)
     if (decode) {
         log_verbose("operation: decode (chart -> wav), gain %.2f, threads %u\n",
                     gain, codec_threads());
-        return decode_cmd(in, out, gain);
+        return decode_cmd(in, out, gain, sample_fmt);
     }
     log_verbose("operation: encode (audio -> chart), threads %u\n", codec_threads());
-    return encode_cmd(in, out, song, artist, xzopt, zstdopt, outfmt, encflags);
+    return encode_cmd(in, out, song, artist, xzopt, zstdopt, outfmt, encflags, sample_fmt);
 }

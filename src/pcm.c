@@ -1,30 +1,34 @@
-/* PCM I/O (WAV reader, ffmpeg fallback, ffprobe tags, WAV writer) - see README.md */
+/* PCM I/O (WAV reader/writer, ffmpeg fallback, ffprobe tags) - see README.md */
 #define _POSIX_C_SOURCE 200809L
-#include <ctype.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <math.h>
 #include <stdint.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <time.h>
-#include <unistd.h>
 
 #include "pcm.h"
 #include "util.h"
 
-Pcm pcm_read_wav(const char *path)
+static int16_t rd_s16(const unsigned char *p) { int16_t v; memcpy(&v, p, 2); return v; }
+static float rd_f32(const unsigned char *p) { float v; memcpy(&v, p, 4); return v; }
+
+int16_t pcm_s16_from_f32(float x)
+{
+    long r = lround((double)x * 32768.0);
+    return (int16_t)(r < -32768 ? -32768 : r > 32767 ? 32767 : r);
+}
+
+/* read a mono WAV natively: 16-bit PCM or 32-bit IEEE float. `want` may force
+ * a conversion. An empty result means the caller should fall back to ffmpeg. */
+Pcm pcm_read_wav(const char *path, int want)
 {
     Map m = map_file(path);
     Pcm p = {0};
     if (m.n < 44 || memcmp(m.p, "RIFF", 4) || memcmp(m.p + 8, "WAVE", 4))
         die("%s: not a RIFF/WAVE file", path);
-    int rate = 0, ch = 0, bits = 0, is_pcm = 0;
+    int rate = 0, ch = 0, bits = 0, fmt = 0;
     size_t pos = 12;
     const unsigned char *data = NULL;
     size_t dlen = 0;
@@ -32,11 +36,11 @@ Pcm pcm_read_wav(const char *path)
         uint32_t sz;
         memcpy(&sz, m.p + pos + 4, 4);
         if (memcmp(m.p + pos, "fmt ", 4) == 0) {
-            uint16_t fmt, c, b;
-            memcpy(&fmt, m.p + pos + 8, 2);
+            uint16_t f2, c, b;
+            memcpy(&f2, m.p + pos + 8, 2);
             memcpy(&c, m.p + pos + 10, 2);
             memcpy(&b, m.p + pos + 22, 2);
-            is_pcm = (fmt == 1);
+            fmt = f2;
             ch = c;
             bits = b;
             memcpy(&rate, m.p + pos + 12, 4);
@@ -46,64 +50,112 @@ Pcm pcm_read_wav(const char *path)
         }
         pos += 8 + sz + (sz & 1);
     }
-    if (is_pcm && ch == 1 && bits == 16 && data && dlen && rate > 0) {
-        p.n = dlen / 2;
-        p.s = malloc(p.n * 2);
-        if (!p.s) die("out of memory");
-        memcpy(p.s, data, p.n * 2);
+    if (data && (size_t)(m.p + m.n - data) < dlen)
+        dlen = (size_t)(m.p + m.n - data);          /* trust the file size */
+    int src_s16 = fmt == 1 && bits == 16;
+    int src_f32 = fmt == 3 && bits == 32;
+    if (ch == 1 && data && dlen && rate > 0 && (src_s16 || src_f32)) {
+        size_t n = src_f32 ? dlen / 4 : dlen / 2;
+        int to_f32 = want == SAMPLE_F32 || (want == SAMPLE_AUTO && src_f32);
+        p.n = n;
         p.rate = rate;
+        if (to_f32) {
+            p.f = malloc(n * sizeof *p.f);
+            if (!p.f) die("out of memory");
+            for (size_t i = 0; i < n; i++)
+                p.f[i] = src_f32 ? rd_f32(data + i * 4) : (float)(rd_s16(data + i * 2) / 32768.0);
+        } else {
+            p.s = malloc(n * 2);
+            if (!p.s) die("out of memory");
+            for (size_t i = 0; i < n; i++) {
+                if (src_f32) {
+                    p.s[i] = pcm_s16_from_f32(rd_f32(data + i * 4));
+                } else {
+                    memcpy(&p.s[i], data + i * 2, 2);
+                }
+            }
+        }
     }
     map_close(&m);
-    return p; /* empty -> caller falls back to ffmpeg */
+    return p;
 }
 
-Pcm pcm_ffmpeg(const char *path)
+static int ffprobe_stream(const char *path, int *rate, char *sf, size_t sfsz)
 {
     char cmd[9000];
     snprintf(cmd, sizeof cmd,
-             "ffmpeg -v error -i \"%s\" -f s16le -ac 1 pipe:1", path);
+             "ffprobe -v error -show_entries stream=sample_rate,sample_fmt "
+             "-of default=noprint_wrappers=1 \"%s\"", path);
+    FILE *fp = popen(cmd, "r");
+    if (!fp) return -1;
+    char line[128];
+    *rate = 0;
+    if (sfsz) sf[0] = '\0';
+    while (fgets(line, sizeof line, fp)) {
+        char *eq = strchr(line, '=');
+        if (!eq) continue;
+        *eq = '\0';
+        char *val = eq + 1;
+        val[strcspn(val, "\r\n")] = '\0';
+        if (strcmp(line, "sample_rate") == 0) *rate = atoi(val);
+        else if (sfsz && strcmp(line, "sample_fmt") == 0) snprintf(sf, sfsz, "%s", val);
+    }
+    pclose(fp);
+    return *rate > 0 ? 0 : -1;
+}
+
+static int fmt_is_float(const char *sf)
+{
+    return strncmp(sf, "flt", 3) == 0 || strncmp(sf, "dbl", 3) == 0 ||
+           strncmp(sf, "s32", 3) == 0;
+}
+
+Pcm pcm_ffmpeg(const char *path, int want)
+{
+    int rate = 0;
+    char sf[32] = {0};
+    if (ffprobe_stream(path, &rate, sf, sizeof sf) != 0)
+        die("cannot determine sample format of %s", path);
+    int use_f32 = want == SAMPLE_F32 || (want == SAMPLE_AUTO && fmt_is_float(sf));
+    if (want == SAMPLE_AUTO && strncmp(sf, "s32", 3) == 0)
+        log_info("note: 32-bit integer input is kept at float32 precision "
+                 "(24-bit mantissa)\n");
+    char cmd[9000];
+    snprintf(cmd, sizeof cmd, "ffmpeg -v error -i \"%s\" -f %s -ac 1 pipe:1",
+             path, use_f32 ? "f32le" : "s16le");
     FILE *fp = popen(cmd, "r");
     if (!fp) die("cannot run ffmpeg for %s", path);
-    size_t cap = 1 << 20, len = 0;
-    int16_t *buf = malloc(cap);
+    size_t bps = use_f32 ? 4 : 2, cap = 1 << 20, len = 0;
+    unsigned char *buf = malloc(cap);
     if (!buf) die("out of memory");
     for (;;) {
         if (len + 65536 > cap) {
             cap *= 2;
-            int16_t *nb = realloc(buf, cap);
+            unsigned char *nb = realloc(buf, cap);
             if (!nb) die("out of memory");
             buf = nb;
         }
-        size_t r = fread((char *)buf + len, 1, 65536, fp);
+        size_t r = fread(buf + len, 1, 65536, fp);
         len += r;
         if (r < 65536) break;
     }
     if (pclose(fp) != 0) die("ffmpeg failed on %s", path);
     Pcm p = {0};
-    p.s = buf;
-    p.n = len / 2;
-
-    char cmd2[9000];
-    snprintf(cmd2, sizeof cmd2,
-             "ffprobe -v error -show_entries stream=sample_rate "
-             "-of default=noprint_wrappers=1:nokey=1 \"%s\"", path);
-    fp = popen(cmd2, "r");
-    if (!fp) die("cannot run ffprobe for %s", path);
-    char line[64] = {0};
-    if (fgets(line, sizeof line, fp)) p.rate = atoi(line);
-    pclose(fp);
-    if (p.rate <= 0) die("cannot determine sample rate of %s", path);
+    p.n = len / bps;
+    p.rate = rate;
+    if (use_f32) p.f = (float *)buf;
+    else p.s = (int16_t *)buf;
     return p;
 }
 
-Pcm pcm_load(const char *path)
+Pcm pcm_load(const char *path, int want)
 {
     size_t l = strlen(path);
     if (l >= 4 && strcasecmp(path + l - 4, ".wav") == 0) {
-        Pcm p = pcm_read_wav(path);
-        if (p.s) return p;
+        Pcm p = pcm_read_wav(path, want);
+        if (p.s || p.f) return p;
     }
-    return pcm_ffmpeg(path);
+    return pcm_ffmpeg(path, want);
 }
 
 char *ffprobe_tag(const char *path, const char *key)
@@ -132,11 +184,11 @@ char *ffprobe_tag(const char *path, const char *key)
     return out;
 }
 
-void wav_write(const char *path, const int16_t *s, size_t n, int rate)
+static FILE *wav_open(const char *path, size_t n, int rate, int bits)
 {
     FILE *f = fopen(path, "wb");
     if (!f) die("cannot write %s: %s", path, strerror(errno));
-    uint32_t dlen = (uint32_t)(n * 2);
+    uint32_t dlen = (uint32_t)(n * (size_t)(bits / 8));
     uint8_t hdr[44];
     memcpy(hdr, "RIFF", 4);
     uint32_t fsz = 36 + dlen;
@@ -145,21 +197,53 @@ void wav_write(const char *path, const int16_t *s, size_t n, int rate)
     memcpy(hdr + 12, "fmt ", 4);
     uint32_t c16 = 16;
     memcpy(hdr + 16, &c16, 4);
-    uint16_t w = 1;
+    uint16_t w = bits == 32 ? 3 : 1;            /* IEEE float / PCM */
     memcpy(hdr + 20, &w, 2);
-    memcpy(hdr + 22, &w, 2);                    /* mono */
+    w = 1;                                      /* mono */
+    memcpy(hdr + 22, &w, 2);
     uint32_t dw = (uint32_t)rate;
     memcpy(hdr + 24, &dw, 4);
-    dw = (uint32_t)rate * 2;
+    dw = (uint32_t)rate * (uint32_t)(bits / 8);
     memcpy(hdr + 28, &dw, 4);
-    w = 2;
+    w = (uint16_t)(bits / 8);
     memcpy(hdr + 32, &w, 2);
-    w = 16;
+    w = (uint16_t)bits;
     memcpy(hdr + 34, &w, 2);
     memcpy(hdr + 36, "data", 4);
     memcpy(hdr + 40, &dlen, 4);
     fwrite(hdr, 1, 44, f);
-    fwrite(s, 2, n, f);
+    return f;
+}
+
+void wav_write(const char *path, const int16_t *s, size_t n, int rate, double gain)
+{
+    FILE *f = wav_open(path, n, rate, 16);
+    if (gain == 1.0) {
+        fwrite(s, 2, n, f);
+    } else {
+        int16_t buf[4096];
+        for (size_t i = 0; i < n; i++) {
+            long v = lround(s[i] * gain);
+            buf[i % 4096] = (int16_t)(v < -32768 ? -32768 : v > 32767 ? 32767 : v);
+            if (i % 4096 == 4095) fwrite(buf, 1, sizeof buf, f);
+        }
+        if (n % 4096) fwrite(buf, 1, (n % 4096) * 2, f);
+    }
     fclose(f);
 }
 
+void wav_write_f32(const char *path, const float *src, size_t n, int rate, double gain)
+{
+    FILE *f = wav_open(path, n, rate, 32);
+    if (gain == 1.0) {
+        fwrite(src, 4, n, f);
+    } else {
+        float buf[4096];
+        for (size_t i = 0; i < n; i++) {
+            buf[i % 4096] = (float)(src[i] * gain);
+            if (i % 4096 == 4095) fwrite(buf, 1, sizeof buf, f);
+        }
+        if (n % 4096) fwrite(buf, 1, (n % 4096) * 4, f);
+    }
+    fclose(f);
+}

@@ -50,6 +50,13 @@ int16_t vol_to_sample(double v)
     return (int16_t)s;
 }
 
+/* float32 mode: sample x in [-1,1] <-> volume x*50; %.9g round-trips float32
+ * exactly (including the sign of zero, which we deliberately keep). */
+static void volstr_f32(float x, char *out, size_t outsz)
+{
+    snprintf(out, outsz, "%.9g", (double)x * 50.0);
+}
+
 Audio audio_decode_map(const Map *m)
 {
     Events ev = {0};
@@ -57,19 +64,25 @@ Audio audio_decode_map(const Map *m)
     Meta meta;
     meta_parse(m, &meta);
     long entries = angle_entries(m);
+    int f32 = chart_codec_f32(m) == 1;
 
     size_t base = 0;
-    if (meta.has_vol && fabs(meta.vol) <= 50.0 && entries > 0)
+    if (f32 && entries > 0)
+        base = (size_t)entries;                          /* f32: one per sample */
+    else if (meta.has_vol && fabs(meta.vol) <= 50.0 && entries > 0)
         base = (size_t)entries;                          /* v2: one per sample */
     else if (entries > 0)
         base = (size_t)(entries - 1);                    /* legacy: samples+1 */
     int64_t last_floor = ev.n ? ev.floor[ev.n - 1] : 0;
     size_t total = base > (size_t)last_floor ? base : (size_t)last_floor;
     int rate = meta.has_bpm && meta.bpm > 0 ? (int)(meta.bpm / 60.0 + 0.5) : 44100;
+    if (total == 0) total = 1;
 
-    int16_t *out = calloc(total ? total : 1, 2);
-    if (!out) die("out of memory (%zu samples)", total);
+    int16_t *out = f32 ? NULL : calloc(total, 2);
+    float *outf = f32 ? calloc(total, sizeof *outf) : NULL;
+    if (!out && !outf) die("out of memory (%zu samples)", total);
 
+    double curv = meta.has_vol ? meta.vol : 0.0;
     int32_t cur = meta.has_vol ? vol_to_sample(meta.vol) : 0;
     size_t pos = 0;
     for (size_t i = 0; i < ev.n; i++) {
@@ -77,20 +90,31 @@ Audio audio_decode_map(const Map *m)
         if (f < 1) continue;
         size_t want = (size_t)f - 1;
         if (want >= total) break;
-        if (want > pos) {
+        if (f32) {
+            float v = (float)(curv / 50.0);
+            for (size_t k = pos; k < want; k++) outf[k] = v;
+            curv = ev.vol[i];
+            outf[want] = (float)(curv / 50.0);
+        } else {
             for (size_t k = pos; k < want; k++) out[k] = (int16_t)cur;
+            cur = vol_to_sample(ev.vol[i]);
+            out[want] = (int16_t)cur;
         }
-        cur = vol_to_sample(ev.vol[i]);
-        out[want] = (int16_t)cur;
         pos = want + 1;
     }
-    for (; pos < total; pos++) out[pos] = (int16_t)cur;
+    if (f32) {
+        float v = (float)(curv / 50.0);
+        for (; pos < total; pos++) outf[pos] = v;
+    } else {
+        for (; pos < total; pos++) out[pos] = (int16_t)cur;
+    }
 
-    log_info("read %zu events, %zu samples\n", ev.n, total);
+    log_info("read %zu events, %zu samples (%s)\n", ev.n, total,
+             f32 ? "float32" : "int16");
     free(ev.floor);
     free(ev.vol);
 
-    Audio a = { out, total, rate };
+    Audio a = { out, outf, total, rate };
     return a;
 }
 
@@ -111,31 +135,52 @@ static size_t wput(FILE *f, const void *b, size_t n)
 static size_t wstr(FILE *f, const char *s) { return wput(f, s, strlen(s)); }
 static size_t wch(FILE *f, int c) { fputc(c, f); return 1; }
 
-size_t encode_core(FILE *f, const int16_t *s, size_t n, int rate,
-                           const char *title, const char *artist,
+size_t encode_core(FILE *f, const Pcm *p, const char *title, const char *artist,
                            size_t *events_out, unsigned flags)
 {
     int pretty = (flags & ENC_PRETTY) != 0;
     int minimal = (flags & ENC_MINIMAL) != 0;
+    int f32 = p->f != NULL;                 /* float32 chart (lossless) */
+    const int16_t *s = p->s;
+    const float *fs = p->f;
+    size_t n = p->n;
+    int rate = p->rate;
     size_t max_events = n > 1 ? n - 1 : 0;
     int64_t *efloor = malloc((max_events ? max_events : 1) * sizeof *efloor);
-    int16_t *esamp = malloc((max_events ? max_events : 1) * 2);
-    if (!efloor || !esamp) die("out of memory");
+    int16_t *esamp = f32 ? NULL : malloc((max_events ? max_events : 1) * 2);
+    float *ef32 = f32 ? malloc((max_events ? max_events : 1) * sizeof *ef32) : NULL;
+    if (!efloor || (f32 ? !ef32 : !esamp)) die("out of memory");
     size_t ne = 0;
-    int16_t prev = s[0];
-    for (size_t i = 1; i < n; i++) {
-        if (s[i] != prev) {
-            efloor[ne] = (int64_t)(i + 1);
-            esamp[ne] = s[i];
-            ne++;
-            prev = s[i];
+    if (f32) {
+        float prev = fs[0];
+        for (size_t i = 1; i < n; i++) {
+            /* memcmp: +0.0 and -0.0 are different bit patterns and must both
+             * survive the round trip */
+            if (memcmp(&fs[i], &prev, sizeof prev) != 0) {
+                efloor[ne] = (int64_t)(i + 1);
+                ef32[ne] = fs[i];
+                ne++;
+                prev = fs[i];
+            }
+        }
+    } else {
+        int16_t prev = s[0];
+        for (size_t i = 1; i < n; i++) {
+            if (s[i] != prev) {
+                efloor[ne] = (int64_t)(i + 1);
+                esamp[ne] = s[i];
+                ne++;
+                prev = s[i];
+            }
         }
     }
 
     char etitle[600], eartist[600], v0[32];
     esc_json(title, etitle, sizeof etitle);
     esc_json(artist, eartist, sizeof eartist);
-    volstr(s[0], v0, sizeof v0);
+    if (f32) volstr_f32(fs[0], v0, sizeof v0);
+    else volstr(s[0], v0, sizeof v0);
+    const char *codec_tag = f32 ? "f32" : "s16";
 
     size_t nw = 0;                       /* bytes written (== plaintext size) */
 
@@ -178,17 +223,33 @@ size_t encode_core(FILE *f, const int16_t *s, size_t n, int rate,
             "\t\t\"author\": %s,\r\n"
             "\t\t\"hitsound\": \"Kick\",\r\n"
             "\t\t\"hitsoundVolume\": %s,\r\n"
-            "\t\t\"offset\": 0\r\n"
+            "\t\t\"offset\": 0,\r\n"
+            "\t\t\"editorComment\": \"adofai-music:%s\"\r\n"
             "\t},\r\n"
             "\t\"actions\": [\r\n",
-            rate * 60, eartist, etitle, AUTHOR_JSON, v0)
+            rate * 60, eartist, etitle, AUTHOR_JSON, v0, codec_tag)
         : snprintf(setb, sizeof setb,
             "],\"settings\":{\"version\":13,\"bpm\":%d,\"artist\":\"%s\",\"song\":\"%s\","
-            "\"author\":%s,\"hitsound\":\"Kick\",\"hitsoundVolume\":%s,\"offset\":0},"
-            "\"actions\":[",
-            rate * 60, eartist, etitle, AUTHOR_JSON, v0);
+            "\"author\":%s,\"hitsound\":\"Kick\",\"hitsoundVolume\":%s,\"offset\":0,"
+            "\"editorComment\":\"adofai-music:%s\"},\"actions\":[",
+            rate * 60, eartist, etitle, AUTHOR_JSON, v0, codec_tag);
     if (sl < 0 || (size_t)sl >= sizeof setb) die("settings block overflow");
     nw += wput(f, setb, (size_t)sl);
+
+    /* first action: a standard EditorComment event carrying the codec tag */
+    {
+        char cbuf[256];
+        int cl = pretty
+            ? snprintf(cbuf, sizeof cbuf,
+                       "\t\t{ \"floor\": 0, \"eventType\": \"EditorComment\", "
+                       "\"comment\": \"adofai-music:%s\" }", codec_tag)
+            : snprintf(cbuf, sizeof cbuf,
+                       "{\"floor\":0,\"eventType\":\"EditorComment\","
+                       "\"comment\":\"adofai-music:%s\"}", codec_tag);
+        nw += wput(f, cbuf, (size_t)cl);
+        if (ne) nw += wstr(f, pretty ? ",\r\n" : ",");
+        else nw += wstr(f, pretty ? "\r\n" : "");
+    }
 
     {
         char *buf = malloc(1 << 20);
@@ -197,29 +258,36 @@ size_t encode_core(FILE *f, const int16_t *s, size_t n, int rate,
         char line[512];
         for (size_t i = 0; i < ne; i++) {
             char vs[32];
-            volstr(esamp[i], vs, sizeof vs);   /* exact dyadic value, no precision loss */
+            if (f32) volstr_f32(ef32[i], vs, sizeof vs);
+            else volstr(esamp[i], vs, sizeof vs);
             const char *fmt;
             if (pretty && minimal)
                 fmt = "\t\t{ \"floor\": %lld, \"eventType\": \"SetHitsound\", "
-                      "\"hitsoundVolume\": %s },\r\n";
+                      "\"hitsoundVolume\": %s }";
             else if (pretty)
                 fmt = "\t\t{ \"floor\": %lld, \"eventType\": \"SetHitsound\", "
                       "\"gameSound\": \"Hitsound\", \"hitsound\": \"Kick\", "
-                      "\"hitsoundVolume\": %s },\r\n";
+                      "\"hitsoundVolume\": %s }";
             else if (minimal)
                 fmt = "{\"floor\":%lld,\"eventType\":\"SetHitsound\","
-                      "\"hitsoundVolume\":%s},";
+                      "\"hitsoundVolume\":%s}";
             else
                 fmt = "{\"floor\":%lld,\"eventType\":\"SetHitsound\","
                       "\"gameSound\":\"Hitsound\",\"hitsound\":\"Kick\","
-                      "\"hitsoundVolume\":%s},";
+                      "\"hitsoundVolume\":%s}";
+            int last = i + 1 == ne;
+            const char *sep = last ? (pretty ? "\r\n" : "")
+                                   : (pretty ? ",\r\n" : ",");
             int ln = snprintf(line, sizeof line, fmt, (long long)efloor[i], vs);
-            if (bl + (size_t)ln + 1 > (1 << 20)) {
+            size_t seplen = strlen(sep);
+            if (bl + (size_t)ln + seplen + 1 > (1 << 20)) {
                 nw += wput(f, buf, bl);
                 bl = 0;
             }
             memcpy(buf + bl, line, (size_t)ln);
             bl += (size_t)ln;
+            memcpy(buf + bl, sep, seplen);
+            bl += seplen;
         }
         nw += wput(f, buf, bl);
         free(buf);
@@ -227,6 +295,7 @@ size_t encode_core(FILE *f, const int16_t *s, size_t n, int rate,
     nw += wstr(f, pretty ? "\t]\r\n}\r\n" : "]}");
     free(efloor);
     free(esamp);
+    free(ef32);
     if (events_out) *events_out = ne;
     return nw;
 }

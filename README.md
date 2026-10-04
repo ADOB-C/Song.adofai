@@ -16,6 +16,7 @@ make test                  # 纯内存自检（不写盘）
 
 ./build/adofai-music -i in.m4a -metadata song="Unity" -metadata artist="TheFatRat" out.adofai
 ./build/adofai-music -i in.wav out.adofai.xz     # .xz（或 .zst）边编码边压缩
+./build/adofai-music -i in.flac -sample_fmt f32 out.adofai  # 保留 float32（无损）
 ./build/adofai-music -i in.wav -f xz -threads 4 chart.bin   # 扩展名无所谓，-f 说了算
 ./build/adofai-music -i out.adofai.xz back.wav   # 谱面 → WAV
 ./build/adofai-music -i out.adofai.xz -play -gain 0.5
@@ -32,10 +33,13 @@ make test                  # 纯内存自检（不写盘）
 
 ## 格式（v2）
 
-- `bpm = 采样率 × 60`；`hitsoundVolume = int16 / 655.36`（dyadic → 文本精确）
-- 只在采样值变化处写 `SetHitsound`：静音/重复值零成本，尾部静音由层数补零
+- `bpm = 采样率 × 60`；只在采样值变化处写 `SetHitsound`（静音/重复值零成本）
 - `angleData` 全 0、单行密排；内嵌 `artist / song / author`
-- 兼容旧版与第三方全事件谱（按 settings 音量自动判别）
+- 采样：int16 谱 `int16/655.36`（dyadic 精确）；**float32 谱 `value×50`，9 位有效数字，
+  含 `-0.0` 在内逐位无损**（24-bit PCM 也可精确落入）
+- float32 谱由首个 `EditorComment` 事件标记 `adofai-music:f32`（标准事件，编辑器可见、
+  不影响玩法），解码端据此判模式；无标记的旧/第三方谱按 settings 音量启发式判别
+- 输出是**严格合法 JSON**（无尾逗号），任何标准解析器都能读
 
 细节见 [docs/format.md](docs/format.md)。
 
