@@ -64,7 +64,7 @@ Audio audio_decode_map(const Map *m)
     Meta meta;
     meta_parse(m, &meta);
     long entries = angle_entries(m);
-    int f32 = chart_codec_f32(m) == 1;
+    int f32 = chart_sample_mode(m, &meta, &ev) == 1;
 
     size_t base = 0;
     if (f32 && entries > 0)
@@ -236,9 +236,11 @@ size_t encode_core(FILE *f, const Pcm *p, const char *title, const char *artist,
     if (sl < 0 || (size_t)sl >= sizeof setb) die("settings block overflow");
     nw += wput(f, setb, (size_t)sl);
 
-    /* first action: a standard EditorComment event carrying the codec tag */
+    /* actions[0]: standard EditorComment event carrying the codec tag
+     * actions[1]: same event type, carrying source-audio provenance */
     {
-        char cbuf[256];
+        char cbuf[512], esrc[256];
+        esc_json(p->info.src[0] ? p->info.src : "?", esrc, sizeof esrc);
         int cl = pretty
             ? snprintf(cbuf, sizeof cbuf,
                        "\t\t{ \"floor\": 0, \"eventType\": \"EditorComment\", "
@@ -246,6 +248,23 @@ size_t encode_core(FILE *f, const Pcm *p, const char *title, const char *artist,
             : snprintf(cbuf, sizeof cbuf,
                        "{\"floor\":0,\"eventType\":\"EditorComment\","
                        "\"comment\":\"adofai-music:%s\"}", codec_tag);
+        nw += wput(f, cbuf, (size_t)cl);
+        nw += wstr(f, pretty ? ",\r\n" : ",");
+        cl = pretty
+            ? snprintf(cbuf, sizeof cbuf,
+                       "\t\t{ \"floor\": 0, \"eventType\": \"EditorComment\", "
+                       "\"comment\": \"adofai-music codec=%s fmt=%s bits=%d ch=%d "
+                       "frames=%zu crc64=%016llx src=%s\" }",
+                       p->info.codec[0] ? p->info.codec : "?", pcm_fmt_name(p->info.fmt),
+                       p->info.bits, p->info.channels, n,
+                       (unsigned long long)p->info.crc64, esrc)
+            : snprintf(cbuf, sizeof cbuf,
+                       "{\"floor\":0,\"eventType\":\"EditorComment\",\"comment\":"
+                       "\"adofai-music codec=%s fmt=%s bits=%d ch=%d frames=%zu "
+                       "crc64=%016llx src=%s\"}",
+                       p->info.codec[0] ? p->info.codec : "?", pcm_fmt_name(p->info.fmt),
+                       p->info.bits, p->info.channels, n,
+                       (unsigned long long)p->info.crc64, esrc);
         nw += wput(f, cbuf, (size_t)cl);
         if (ne) nw += wstr(f, pretty ? ",\r\n" : ",");
         else nw += wstr(f, pretty ? "\r\n" : "");

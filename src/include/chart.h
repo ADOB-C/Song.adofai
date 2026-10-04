@@ -18,5 +18,9 @@ long angle_entries(const Map *m);
 void scan_events(const Map *m, Events *ev);
 /* leading EditorComment marker: 1 = float32 chart, 0 = int16, -1 = no marker */
 int chart_codec_f32(const Map *m);
+/* effective sample mode: marker if present, else content-based (never guess loosely) */
+int chart_sample_mode(const Map *m, const Meta *meta, const Events *ev);
+/* provenance payload of the "adofai-music ..." comment, 0 if absent */
+int chart_source_info(const Map *m, char *out, size_t outsz);
 /* derived stream info: sample count + rate from bpm/angleData/events */
 void chart_stream_info(const Map *m, size_t *samples, double *rate);

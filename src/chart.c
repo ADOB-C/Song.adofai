@@ -180,16 +180,54 @@ void scan_events(const Map *m, Events *ev)
     }
 }
 
-int chart_codec_f32(const Map *m)
+/* both helpers only look at the first few actions, so this stays cheap */
+static const unsigned char *actions_window(const Map *m, size_t *lim)
 {
     size_t win = m->n < (1u << 29) ? m->n : (1u << 29);
     const unsigned char *a = findb(m->p, win, "\"actions\"", 9);
-    if (!a) return -1;
+    if (!a) return NULL;
     size_t rest = m->n - (size_t)(a - m->p);
-    size_t lim = rest < 4096 ? rest : 4096;   /* marker is the first action */
-    if (findb(a, lim, "\"adofai-music:f32\"", 18)) return 1;
-    if (findb(a, lim, "\"adofai-music:s16\"", 18)) return 0;
+    *lim = rest < 4096 ? rest : 4096;
+    return a;
+}
+
+int chart_codec_f32(const Map *m)
+{
+    size_t lim = 0;
+    const unsigned char *a = actions_window(m, &lim);
+    if (!a) return -1;
+    if (findb(a, lim, "adofai-music:f32", 16)) return 1;
+    if (findb(a, lim, "adofai-music:s16", 16)) return 0;
     return -1;
+}
+
+int chart_sample_mode(const Map *m, const Meta *meta, const Events *ev)
+{
+    int t = chart_codec_f32(m);
+    if (t >= 0) return t;
+    if (!meta->has_vol || fabs(meta->vol) > 50.0) return 0;   /* legacy / v1 */
+    /* v2 without a marker: int16 charts keep every volume exactly on the
+     * int16/655.36 grid and within +-50; anything else must be float32 */
+    for (size_t i = 0; i < ev->n; i++) {
+        double v = ev->vol[i], x = v * 655.36;
+        if (fabs(v) > 50.0 || fabs(x - floor(x + 0.5)) > 1e-9) return 1;
+    }
+    return 0;
+}
+
+int chart_source_info(const Map *m, char *out, size_t outsz)
+{
+    size_t lim = 0;
+    const unsigned char *a = actions_window(m, &lim);
+    if (!a || outsz == 0) return 0;
+    const unsigned char *p = findb(a, lim, "adofai-music ", 13);
+    if (!p) return 0;
+    p += 13;                                  /* skip to the payload */
+    while (p < a + lim && *p == ' ') p++;
+    size_t i = 0;
+    while (p < a + lim && *p != '"' && *p != '}' && i + 1 < outsz) out[i++] = (char)*p++;
+    out[i] = '\0';
+    return 1;
 }
 
 void chart_stream_info(const Map *m, size_t *samples, double *rate)
@@ -200,7 +238,7 @@ void chart_stream_info(const Map *m, size_t *samples, double *rate)
     Events ev = {0};
     scan_events(m, &ev);
     int64_t last_floor = ev.n ? ev.floor[ev.n - 1] : 0;
-    int f32 = chart_codec_f32(m) == 1;
+    int f32 = chart_sample_mode(m, &meta, &ev) == 1;
     size_t base = (f32 && entries > 0)
                       ? (size_t)entries
                       : (meta.has_vol && fabs(meta.vol) <= 50.0 && entries > 0)

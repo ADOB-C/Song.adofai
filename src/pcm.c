@@ -14,6 +14,19 @@
 static int16_t rd_s16(const unsigned char *p) { int16_t v; memcpy(&v, p, 2); return v; }
 static float rd_f32(const unsigned char *p) { float v; memcpy(&v, p, 4); return v; }
 
+const char *pcm_fmt_name(int fmt)
+{
+    switch (fmt) {
+        case SAMPLE_S16: return "s16";
+        case SAMPLE_S24: return "s24";
+        case SAMPLE_S32: return "s32";
+        case SAMPLE_F32: return "f32";
+        case SAMPLE_F64: return "f64";
+        case SAMPLE_U8:  return "u8";
+        default:         return "?";
+    }
+}
+
 int16_t pcm_s16_from_f32(float x)
 {
     long r = lround((double)x * 32768.0);
@@ -56,6 +69,10 @@ Pcm pcm_read_wav(const char *path, int want)
     int src_s24 = fmt == 1 && bits == 24;
     int src_f32 = fmt == 3 && bits == 32;
     if (ch == 1 && data && dlen && rate > 0 && (src_s16 || src_s24 || src_f32)) {
+        snprintf(p.info.codec, sizeof p.info.codec, "wav");
+        p.info.fmt = src_s16 ? SAMPLE_S16 : src_s24 ? SAMPLE_S24 : SAMPLE_F32;
+        p.info.bits = bits;
+        p.info.channels = ch;
         size_t n = src_f32 ? dlen / 4 : src_s24 ? dlen / 3 : dlen / 2;
         int to_f32 = want == SAMPLE_F32 ||
                      (want == SAMPLE_AUTO && (src_f32 || src_s24));
@@ -97,19 +114,22 @@ Pcm pcm_read_wav(const char *path, int want)
     return p;
 }
 
-static int ffprobe_stream(const char *path, int *rate, char *sf, size_t sfsz, int *bits)
+static int ffprobe_stream(const char *path, int *rate, char *sf, size_t sfsz, int *bits,
+                          int *channels, char *codec, size_t codecsz)
 {
     char cmd[9000];
     snprintf(cmd, sizeof cmd,
              "ffprobe -v error -show_entries "
-             "stream=sample_rate,sample_fmt,bits_per_raw_sample "
+             "stream=sample_rate,sample_fmt,bits_per_raw_sample,channels,codec_name "
              "-of default=noprint_wrappers=1 \"%s\"", path);
     FILE *fp = popen(cmd, "r");
     if (!fp) return -1;
     char line[128];
     *rate = 0;
     *bits = 0;
+    *channels = 0;
     if (sfsz) sf[0] = '\0';
+    if (codecsz) codec[0] = '\0';
     while (fgets(line, sizeof line, fp)) {
         char *eq = strchr(line, '=');
         if (!eq) continue;
@@ -118,6 +138,8 @@ static int ffprobe_stream(const char *path, int *rate, char *sf, size_t sfsz, in
         val[strcspn(val, "\r\n")] = '\0';
         if (strcmp(line, "sample_rate") == 0) *rate = atoi(val);
         else if (strcmp(line, "bits_per_raw_sample") == 0) *bits = atoi(val);
+        else if (strcmp(line, "channels") == 0) *channels = atoi(val);
+        else if (codecsz && strcmp(line, "codec_name") == 0) snprintf(codec, codecsz, "%s", val);
         else if (sfsz && strcmp(line, "sample_fmt") == 0) snprintf(sf, sfsz, "%s", val);
     }
     pclose(fp);
@@ -126,10 +148,20 @@ static int ffprobe_stream(const char *path, int *rate, char *sf, size_t sfsz, in
 
 Pcm pcm_ffmpeg(const char *path, int want)
 {
-    int rate = 0, bits = 0;
-    char sf[32] = {0};
-    if (ffprobe_stream(path, &rate, sf, sizeof sf, &bits) != 0)
+    int rate = 0, bits = 0, channels = 0;
+    char sf[32] = {0}, codec[24] = {0};
+    if (ffprobe_stream(path, &rate, sf, sizeof sf, &bits, &channels, codec, sizeof codec) != 0)
         die("cannot determine sample format of %s", path);
+    Pcm info = {0};
+    info.info.bits = bits;
+    info.info.channels = channels;
+    snprintf(info.info.codec, sizeof info.info.codec, "%s", codec);
+    info.info.fmt = !strncmp(sf, "u8", 2)     ? SAMPLE_U8
+                  : !strncmp(sf, "s16", 3)    ? SAMPLE_S16
+                  : !strncmp(sf, "flt", 3)    ? SAMPLE_F32
+                  : !strncmp(sf, "dbl", 3)    ? SAMPLE_F64
+                  : !strncmp(sf, "s32", 3)    ? (bits == 24 ? SAMPLE_S24 : SAMPLE_S32)
+                  : SAMPLE_S16;
     int is_flt = strncmp(sf, "flt", 3) == 0;
     int is_dbl = strncmp(sf, "dbl", 3) == 0;
     int is_s32 = strncmp(sf, "s32", 3) == 0;
@@ -166,6 +198,7 @@ Pcm pcm_ffmpeg(const char *path, int want)
     Pcm p = {0};
     p.n = len / bps;
     p.rate = rate;
+    p.info = info.info;
     if (use_f32) p.f = (float *)buf;
     else p.s = (int16_t *)buf;
     return p;
@@ -174,11 +207,17 @@ Pcm pcm_ffmpeg(const char *path, int want)
 Pcm pcm_load(const char *path, int want)
 {
     size_t l = strlen(path);
+    Pcm p = {0};
     if (l >= 4 && strcasecmp(path + l - 4, ".wav") == 0) {
-        Pcm p = pcm_read_wav(path, want);
-        if (p.s || p.f) return p;
+        p = pcm_read_wav(path, want);
+        if (!p.s && !p.f) p = pcm_ffmpeg(path, want);
+    } else {
+        p = pcm_ffmpeg(path, want);
     }
-    return pcm_ffmpeg(path, want);
+    const char *base = strrchr(path, '/');
+    base = base ? base + 1 : path;
+    snprintf(p.info.src, sizeof p.info.src, "%s", base);
+    return p;
 }
 
 char *ffprobe_tag(const char *path, const char *key)

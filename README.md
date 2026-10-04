@@ -40,7 +40,9 @@ make test                  # 纯内存自检（不写盘）
 - `-sample_fmt auto`（默认）跟随源精度：8/16-bit → int16 谱；24-bit PCM 与 32-bit float →
   float32 谱，均无损；64-bit float / 32-bit 整数超出 float32 精度，auto 会报错而不静默降级
 - float32 谱由首个 `EditorComment` 事件标记 `adofai-music:f32`（标准事件，编辑器可见、
-  不影响玩法），解码端据此判模式；无标记的旧/第三方谱按 settings 音量启发式判别
+  不影响玩法）；第二个同类型事件记录**源音频信息**（codec/位深/声道/帧数/CRC64/文件名），
+  `-show` 可看、`-verify` 会核对 CRC64
+- 无标记的旧/第三方谱按内容判别（legacy 音量 / int16 网格 / 其余为 float32），不会误判削波谱
 - 输出是**严格合法 JSON**（无尾逗号），任何标准解析器都能读
 
 细节见 [docs/format.md](docs/format.md)。

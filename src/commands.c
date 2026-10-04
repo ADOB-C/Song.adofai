@@ -16,6 +16,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <lzma.h>
+
 #include "cli.h"
 #include "chart.h"
 #include "pcm.h"
@@ -67,7 +69,11 @@ int decode_cmd(const char *chart, const char *out, double gain, int want)
 int verify_cmd(const char *chart, const char *ref)
 {
     double t0 = now_s();
-    Audio a = audio_decode(chart);
+    Map m = map_open(chart);
+    Audio a = audio_decode_map(&m);
+    char src[512];
+    int have_src = chart_source_info(&m, src, sizeof src);
+    map_close(&m);
     Pcm r = pcm_load(ref, SAMPLE_AUTO);
     if (a.total != r.n) {
         fprintf(stderr, "length mismatch: chart %zu vs ref %zu\n", a.total, r.n);
@@ -92,11 +98,28 @@ int verify_cmd(const char *chart, const char *ref)
     free(a.f);
     free(r.s);
     free(r.f);
+    /* the chart records a CRC64 of its own source samples: check it */
+    int have_crc = 0;
+    uint64_t crc_rec = 0;
+    const char *cp = have_src ? strstr(src, "crc64=") : NULL;
+    if (cp) {
+        crc_rec = strtoull(cp + 6, NULL, 16);
+        have_crc = 1;
+    }
+    uint64_t crc_act = a.f ? lzma_crc64((const uint8_t *)a.f, a.total * sizeof(float), 0)
+                           : lzma_crc64((const uint8_t *)a.s, a.total * 2, 0);
+    const char *crcmsg = !have_crc ? ""
+                       : crc_act == crc_rec ? ", recorded crc64 verified"
+                                            : ", RECORDED CRC64 MISMATCH";
     if (mism == 0) {
-        printf("VERIFY OK: %zu/%zu samples identical%s (%.1fs)\n",
-               a.total, r.n, mixed ? " after int16 quantization" : "", now_s() - t0);
+        printf("VERIFY OK: %zu/%zu samples identical%s%s (%.1fs)\n",
+               a.total, r.n, mixed ? " after int16 quantization" : "", crcmsg,
+               now_s() - t0);
         return 0;
     }
+    if (have_crc && crc_act != crc_rec)
+        fprintf(stderr, "warning: %s: recorded crc64 %016llx != actual %016llx\n",
+                chart, (unsigned long long)crc_rec, (unsigned long long)crc_act);
     printf("VERIFY FAILED: %zu/%zu mismatches%s\n", mism, r.n,
            mixed ? " after int16 quantization" : "");
     return 1;
@@ -116,9 +139,13 @@ int info_cmd(const char *chart)
     printf("artist: %s\n", meta.artist[0] ? meta.artist : "(none)");
     printf("song:   %s\n", meta.song[0] ? meta.song : "(none)");
     printf("author: %s\n", meta.author[0] ? meta.author : "(none)");
+    char src[512];
+    int have_src = chart_source_info(&m, src, sizeof src);
     int cm = chart_codec_f32(&m);
-    printf("codec: %s\n", cm == 1 ? "float32 (lossless)"
-                          : cm == 0 ? "int16" : "int16 (no codec marker)");
+    int mode = chart_sample_mode(&m, &meta, &ev);
+    printf("codec: %s (%s)\n", mode == 1 ? "float32" : "int16",
+           cm < 0 ? "detected from content" : "lossless");
+    if (have_src) printf("source: %s\n", src);
     printf("events: %zu  angle entries: %ld\n", ev.n, entries);
     printf("sample rate (bpm/60): %.1f Hz  duration: %.3fs\n", rate, total / rate);
     if (m.owned)
@@ -188,6 +215,8 @@ int encode_cmd(const char *input, const char *outpath,
             ne_est++;
         }
     }
+    p.info.crc64 = f32 ? lzma_crc64((const uint8_t *)p.f, p.n * sizeof(float), 0)
+                       : lzma_crc64((const uint8_t *)p.s, p.n * 2, 0);
     unsigned long long per_event = f32 ? 90 : 140;   /* conservative upper bounds */
     unsigned long long est = (unsigned long long)p.n * 2 + ne_est * per_event + 4096;
     unsigned long long need = compressed ? est / 16 + (4u << 20) : est + (1u << 20);
@@ -263,7 +292,11 @@ int selftest_cmd(void)
     int rc = 0;
     for (size_t L = 0; L < sizeof layouts / sizeof layouts[0]; L++) {
         for (int f32 = 0; f32 < 2; f32++) {
-            Pcm src = { f32 ? NULL : tone, f32 ? ftone : NULL, (size_t)n, rate };
+            Pcm src = {0};
+            src.s = f32 ? NULL : tone;
+            src.f = f32 ? ftone : NULL;
+            src.n = (size_t)n;
+            src.rate = rate;
             char *cbuf = NULL;
             size_t csize = 0;
             FILE *mf = open_memstream(&cbuf, &csize);

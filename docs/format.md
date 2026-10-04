@@ -21,10 +21,16 @@
 - **float32 谱**：`hitsoundVolume = value × 50`，用 `%.9g` 写出（9 位有效数字足以唯一
   还原 float32，含 `-0.0` 的符号）；解码 `value = volume / 50`，**逐位无损**。
   24-bit PCM 的 24 位尾数可被 float32 精确承载，因此 24-bit 音源同样无损。
+- **溯源信息**：`actions[1]` 是第二个 `EditorComment`，内容形如
+  `adofai-music codec=flac fmt=s24 bits=24 ch=2 frames=9154501 crc64=1a2b3c4d5e6f7788 src=song.flac`
+  （`crc64` 是谱面自身样本的 CRC64）。`-show` 会打印这一行，`-verify` 会重算并核对
+  CRC64（不一致会告警）。源文件名只取 basename，不含路径。
 - **模式标记**：`actions[0]` 是一个标准事件
   `{"floor":0,"eventType":"EditorComment","comment":"adofai-music:f32"}`（s16 谱写 `:s16`）。
-  解码端在 `"actions"` 附近 4 KiB 内查找该标记；没有标记的谱（旧版/第三方）回落到
-  `settings.hitsoundVolume ≤ 50` 的启发式判别。`EditorComment` 是 ADOFAI 标准事件，
+  解码端在 `"actions"` 附近 4 KiB 内查找该标记。没有标记时（旧版/第三方谱，或作者在
+  编辑器里删掉了注释）按内容判别：`settings.hitsoundVolume > 50` → legacy int16；
+  否则若**所有事件音量都 ≤50 且恰好落在 `int16/655.36` 网格上** → int16，否则 float32。
+  这样即使首样本被削波（volume >50）的 float32 谱也不会被误判。`EditorComment` 是 ADOFAI 标准事件，
   多个第三方解析器都有对应类，编辑器里只显示为注释、不影响玩法。
 - **`-sample_fmt auto`（默认）跟随源格式**：u8/s16 → int16 谱；24-bit PCM、32-bit float、
   以及 AAC/Opus 等解码器输出的 `fltp` → float32 谱。以上都无损。8/16/24-bit 整数与
