@@ -34,8 +34,10 @@
   多个第三方解析器都有对应类，编辑器里只显示为注释、不影响玩法。
 - **`-sample_fmt auto`（默认）跟随源格式**：u8/s16 → int16 谱；24-bit PCM、32-bit float、
   以及 AAC/Opus 等解码器输出的 `fltp` → float32 谱。以上都无损。8/16/24-bit 整数与
-  32-bit float 都喂得进；**native WAV 解析支持 16/24-bit PCM 与 32-bit float**，
-  其余走 ffmpeg/ffprobe。
+  32-bit float 都喂得进；**native 解析覆盖 WAV（16/24-bit PCM、32-bit float）与
+  Ogg Vorbis（stb_vorbis）**，其余格式走 ffmpeg/ffprobe。立体声按 ffmpeg 默认矩阵
+  下混单声道（每声道 1/√n，能量守恒）；stb 与 ffmpeg 的 Vorbis 解码差异在
+  ~5e-7 量级（不同 IMDCT 实现的浮点舍入），谱面相对自身解码结果仍逐位无损。
 - **不会悄悄掉精度**：64-bit float（`dbl`）与 32-bit 整数（`bits_per_raw_sample > 24`）
   超出 float32 的 24 位尾数，`auto` 下直接报错并要求显式 `-sample_fmt f32` 接受降精度；
   8-bit 无符号只占 8 位，进 int16 谱无损。

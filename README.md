@@ -74,9 +74,11 @@ ADOFAI 里验证）。
 
 ## 依赖
 
-POSIX（mmap）+ C11；**liblzma**、**libzstd**（`brew install xz zstd`）；播放用随附的
-`third_party/miniaudio.h`（无需安装）；`ffmpeg`/`ffprobe` 仅非 WAV 输入与标签时用。
+POSIX（mmap）+ C11；**liblzma**、**libzstd**（`brew install xz zstd`）；播放与 Ogg Vorbis
+解码用随附的单文件库（`third_party/miniaudio.h`、`third_party/stb_vorbis.c`，无需安装）；
+`ffmpeg`/`ffprobe` 仅用于 WAV / Ogg Vorbis 之外的格式与标签。
 
 ## 许可
 
-MIT。第三方：XZ Utils (0BSD)、Zstandard (BSD-3-Clause)、miniaudio (public domain / MIT-0)。
+MIT。第三方：XZ Utils (0BSD)、Zstandard (BSD-3-Clause)、miniaudio (public domain / MIT-0)、
+stb_vorbis (public domain / MIT)。

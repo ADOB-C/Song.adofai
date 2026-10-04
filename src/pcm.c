@@ -8,6 +8,7 @@
 #include <string.h>
 #include <strings.h>
 
+#include "ogg.h"
 #include "pcm.h"
 #include "util.h"
 
@@ -211,6 +212,9 @@ Pcm pcm_load(const char *path, int want)
     if (l >= 4 && strcasecmp(path + l - 4, ".wav") == 0) {
         p = pcm_read_wav(path, want);
         if (!p.s && !p.f) p = pcm_ffmpeg(path, want);
+    } else if (ogg_sniff(path)) {
+        p = ogg_load(path, want);                 /* native Vorbis */
+        if (!p.s && !p.f) p = pcm_ffmpeg(path, want);   /* e.g. Ogg Opus */
     } else {
         p = pcm_ffmpeg(path, want);
     }
