@@ -223,16 +223,15 @@ size_t encode_core(FILE *f, const Pcm *p, const char *title, const char *artist,
             "\t\t\"author\": %s,\r\n"
             "\t\t\"hitsound\": \"Kick\",\r\n"
             "\t\t\"hitsoundVolume\": %s,\r\n"
-            "\t\t\"offset\": 0,\r\n"
-            "\t\t\"editorComment\": \"adofai-music:%s\"\r\n"
+            "\t\t\"offset\": 0\r\n"
             "\t},\r\n"
             "\t\"actions\": [\r\n",
-            rate * 60, eartist, etitle, AUTHOR_JSON, v0, codec_tag)
+            rate * 60, eartist, etitle, AUTHOR_JSON, v0)
         : snprintf(setb, sizeof setb,
             "],\"settings\":{\"version\":13,\"bpm\":%d,\"artist\":\"%s\",\"song\":\"%s\","
-            "\"author\":%s,\"hitsound\":\"Kick\",\"hitsoundVolume\":%s,\"offset\":0,"
-            "\"editorComment\":\"adofai-music:%s\"},\"actions\":[",
-            rate * 60, eartist, etitle, AUTHOR_JSON, v0, codec_tag);
+            "\"author\":%s,\"hitsound\":\"Kick\",\"hitsoundVolume\":%s,\"offset\":0},"
+            "\"actions\":[",
+            rate * 60, eartist, etitle, AUTHOR_JSON, v0);
     if (sl < 0 || (size_t)sl >= sizeof setb) die("settings block overflow");
     nw += wput(f, setb, (size_t)sl);
 
