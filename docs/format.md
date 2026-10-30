@@ -44,7 +44,9 @@
   2=stereo、3=2.1、4=4.0、5=5.0、6=5.1、7=6.1、8=7.1（实测逐声道脉冲验证，
   与 ffmpeg 的差 ≤1.2e-7）；>8 声道退回等权 1/√n。WAVEFORMATEXTENSIBLE 走 ffmpeg
   （按 channel mask 处理）。
-- 与 ffmpeg 自带解码相比：Vorbis 的解码差异 ~5e-7（不同 IMDCT 实现的浮点舍入），
+- **原生 Vorbis 仅限 1–2 声道**：实测 stb 解 5.1 Vorbis 与 ffmpeg 的逐通道相关为 0
+  （3/4/5 声道则完全相关），所以 >2 声道 Vorbis 一律交给 ffmpeg；没有 ffmpeg 时明确报错。
+- 与 ffmpeg 自带解码相比：立体声 Vorbis 的解码差异 ~5e-7（不同 IMDCT 实现的浮点舍入），
   下混系数一致；谱面相对自身解码结果仍逐位无损。
 - **不会悄悄掉精度**：64-bit float（`dbl`）与 32-bit 整数（`bits_per_raw_sample > 24`）
   超出 float32 的 24 位尾数，`auto` 下直接报错并要求显式 `-sample_fmt f32` 接受降精度；

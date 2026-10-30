@@ -32,7 +32,7 @@ typedef struct {
 Pcm pcm_load(const char *path, int want);
 char *ffprobe_tag(const char *path, const char *key);
 const char *pcm_fmt_name(int fmt);          /* "s16" / "s24" / "f32" ... */
-int pcm_downmix_weights(int ch, double *w); /* ffmpeg-aligned mono weights */
+int pcm_downmix_weights(int ch, double *w); /* ffmpeg-aligned mono weights (WAV order) */
 int16_t pcm_s16_from_f32(float x);          /* round + clip */
 void wav_write(const char *path, const int16_t *s, size_t n, int rate, double gain);
 void wav_write_f32(const char *path, const float *f, size_t n, int rate, double gain);

@@ -197,7 +197,7 @@ Pcm pcm_ffmpeg(const char *path, int want)
     int rate = 0, bits = 0, channels = 0;
     char sf[32] = {0}, codec[24] = {0};
     if (ffprobe_stream(path, &rate, sf, sizeof sf, &bits, &channels, codec, sizeof codec) != 0)
-        die("cannot determine sample format of %s", path);
+        die("cannot determine sample format of %s (need ffmpeg/ffprobe; install it or pass -ffmpeg PATH)", path);
     Pcm info = {0};
     info.info.bits = bits;
     info.info.channels = channels;

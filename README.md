@@ -83,7 +83,8 @@ POSIX（mmap）+ C11；**liblzma**、**libzstd**（`brew install xz zstd`）；�
 `ffmpeg`/`ffprobe` 仅用于 WAV / Ogg Vorbis 之外的格式；可用 `-ffmpeg <目录|二进制>` 或
 环境变量 `ADOFAI_FFMPEG` 指向别处的 ffmpeg（例如游戏安装目录里自带的那份）。
 
-Ogg Vorbis 的 `TITLE`/`ARTIST` 标签由 stb_vorbis 原生读取（不需要 ffprobe），
+Ogg Vorbis 原生解码只覆盖单声道/立体声（stb 的 >2 声道解码不可信，实测 5.1 完全对不上；
+多声道 Vorbis 自动交给 ffmpeg）。`TITLE`/`ARTIST` 标签由 stb_vorbis 原生读取（不需要 ffprobe），
 显式 `-metadata` 优先；其它格式的标签回退走 ffprobe。
 
 ## 许可

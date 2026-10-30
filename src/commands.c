@@ -335,6 +335,17 @@ int selftest_cmd(void)
             (void)ne;
         }
     }
+    {   /* lock the ffmpeg-aligned mono weights (5.1 = FL FR FC LFE BL BR) */
+        const double F = 0.7071067811865476, S = 0.5, C = 1.0, L = 0.0;
+        const double exp6[6] = {F, F, C, L, S, S};
+        double w[8];
+        int ok = 1;
+        pcm_downmix_weights(6, w);
+        for (int i = 0; i < 6; i++)
+            if (fabs(w[i] - exp6[i]) > 1e-12) ok = 0;
+        printf("SELF-TEST %s: ffmpeg downmix weights (5.1)\n", ok ? "PASSED" : "FAILED");
+        if (!ok) rc = 1;
+    }
     free(tone);
     free(ftone);
     return rc;

@@ -70,6 +70,14 @@ Pcm ogg_load(const char *path, int want)
     stb_vorbis_info vi = stb_vorbis_get_info(v);
     int ch = vi.channels > 0 ? vi.channels : 1;
     int rate = (int)vi.sample_rate;
+    if (ch > 2) {
+        /* stb_vorbis' multichannel decode is not trustworthy (5.1 mismatches
+         * ffmpeg completely); let ffmpeg handle it. */
+        stb_vorbis_close(v);
+        map_close(&m);
+        log_info("note: %d-channel Vorbis -> ffmpeg (native path is stereo/mono)\n", ch);
+        return p;
+    }
     size_t cap = 1 << 20, n = 0;
     float *buf = malloc(cap * sizeof *buf);
     if (!buf) die("out of memory");
@@ -92,12 +100,8 @@ Pcm ogg_load(const char *path, int want)
         return p;
     }
 
-    /* ffmpeg-aligned mono downmix weights (see pcm_downmix_weights) */
-    double w[64];
-    if (ch > 64) {
-        free(buf);
-        return p;
-    }
+    /* mono/stereo only: ffmpeg-aligned weights (both are trivial here) */
+    double w[2] = {1.0, 1.0};
     pcm_downmix_weights(ch, w);
     p.n = n;
     p.rate = rate;
