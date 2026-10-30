@@ -32,12 +32,20 @@
   否则若**所有事件音量都 ≤50 且恰好落在 `int16/655.36` 网格上** → int16，否则 float32。
   这样即使首样本被削波（volume >50）的 float32 谱也不会被误判。`EditorComment` 是 ADOFAI 标准事件，
   多个第三方解析器都有对应类，编辑器里只显示为注释、不影响玩法。
+- **不做任何重采样**：`bpm = 采样率 × 60` 原样记录，192 kHz 源就是 bpm 11,520,000、
+  6,800 万层——这是有意的（超高物量测试素材）。需要小谱请自行用 ffmpeg 降采样。
 - **`-sample_fmt auto`（默认）跟随源格式**：u8/s16 → int16 谱；24-bit PCM、32-bit float、
   以及 AAC/Opus 等解码器输出的 `fltp` → float32 谱。以上都无损。8/16/24-bit 整数与
-  32-bit float 都喂得进；**native 解析覆盖 WAV（16/24-bit PCM、32-bit float）与
-  Ogg Vorbis（stb_vorbis）**，其余格式走 ffmpeg/ffprobe。立体声按 ffmpeg 默认矩阵
-  下混单声道（每声道 1/√n，能量守恒）；stb 与 ffmpeg 的 Vorbis 解码差异在
-  ~5e-7 量级（不同 IMDCT 实现的浮点舍入），谱面相对自身解码结果仍逐位无损。
+  32-bit float 都喂得进；**native 解析覆盖 WAV（16/24-bit PCM、32-bit float，任意声道数）
+  与 Ogg Vorbis（stb_vorbis）**，其余格式走 ffmpeg/ffprobe。
+- **多声道 → 单声道严格对齐 ffmpeg（libswresample）**：`clev = slev = M_SQRT1_2`
+  （options.c:32,58-61），单声道矩阵 `L/R = 1/√2`、`FC = clev·√2 = 1.0`、
+  环绕 `= slev/√2 = 0.5`、`LFE = 0`（rematrix.c:252-255、282）。按声道数的默认布局：
+  2=stereo、3=2.1、4=4.0、5=5.0、6=5.1、7=6.1、8=7.1（实测逐声道脉冲验证，
+  与 ffmpeg 的差 ≤1.2e-7）；>8 声道退回等权 1/√n。WAVEFORMATEXTENSIBLE 走 ffmpeg
+  （按 channel mask 处理）。
+- 与 ffmpeg 自带解码相比：Vorbis 的解码差异 ~5e-7（不同 IMDCT 实现的浮点舍入），
+  下混系数一致；谱面相对自身解码结果仍逐位无损。
 - **不会悄悄掉精度**：64-bit float（`dbl`）与 32-bit 整数（`bits_per_raw_sample > 24`）
   超出 float32 的 24 位尾数，`auto` 下直接报错并要求显式 `-sample_fmt f32` 接受降精度；
   8-bit 无符号只占 8 位，进 int16 谱无损。

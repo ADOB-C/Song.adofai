@@ -92,9 +92,13 @@ Pcm ogg_load(const char *path, int want)
         return p;
     }
 
-    /* downmix to mono with 1/sqrt(n) per channel: this is ffmpeg's default
-     * matrix (energy preserving), so .ogg and .opus land at the same level */
-    double g = 1.0 / sqrt((double)ch);
+    /* ffmpeg-aligned mono downmix weights (see pcm_downmix_weights) */
+    double w[64];
+    if (ch > 64) {
+        free(buf);
+        return p;
+    }
+    pcm_downmix_weights(ch, w);
     p.n = n;
     p.rate = rate;
     if (want == SAMPLE_S16) {
@@ -102,16 +106,16 @@ Pcm ogg_load(const char *path, int want)
         if (!p.s) die("out of memory");
         for (size_t i = 0; i < n; i++) {
             double acc = 0;
-            for (int c = 0; c < ch; c++) acc += buf[i * (size_t)ch + c];
-            p.s[i] = pcm_s16_from_f32((float)(acc * g));
+            for (int c = 0; c < ch; c++) acc += w[c] * buf[i * (size_t)ch + c];
+            p.s[i] = pcm_s16_from_f32((float)acc);
         }
     } else {
         p.f = malloc(n * sizeof *p.f);
         if (!p.f) die("out of memory");
         for (size_t i = 0; i < n; i++) {
             double acc = 0;
-            for (int c = 0; c < ch; c++) acc += buf[i * (size_t)ch + c];
-            p.f[i] = (float)(acc * g);
+            for (int c = 0; c < ch; c++) acc += w[c] * buf[i * (size_t)ch + c];
+            p.f[i] = (float)acc;
         }
     }
     free(buf);

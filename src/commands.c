@@ -182,7 +182,8 @@ int encode_cmd(const char *input, const char *outpath,
             if (a > peak) peak = a;
         }
         if (peak > 1.0f)
-            log_info("note: peak %.4f exceeds 1.0; ADOFAI may clamp volumes >50\n", peak);
+            log_info("note: peak %.4f > 1.0 (downmix gain); volumes up to 100 stay exact, "
+                     "above that the mix clips\n", peak);
     }
 
     char title[512] = {0}, artist[512] = {0};
@@ -197,6 +198,11 @@ int encode_cmd(const char *input, const char *outpath,
         char *a = ogg ? ogg_tag(input, "ARTIST") : ffprobe_tag(input, "artist");
         if (a) { snprintf(artist, sizeof artist, "%s", a); free(a); }
     }
+
+    if (p.rate > 96000)
+        log_info("note: %d Hz source -> bpm %d, %zu samples/tiles; "
+                 "no resampling is done (pre-downsample with ffmpeg for a smaller chart)\n",
+                 p.rate, p.rate * 60, p.n);
 
     char out[MAX_PATH_LEN];
     snprintf(out, sizeof out, "%s", outpath);

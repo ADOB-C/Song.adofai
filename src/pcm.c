@@ -34,8 +34,38 @@ int16_t pcm_s16_from_f32(float x)
     return (int16_t)(r < -32768 ? -32768 : r > 32767 ? 32767 : r);
 }
 
-/* read a mono WAV natively: 16-bit PCM or 32-bit IEEE float. `want` may force
- * a conversion. An empty result means the caller should fall back to ffmpeg. */
+/* ffmpeg/libswresample default mono-downmix weights by channel count (measured):
+ * 1=mono 2=stereo 3=2.1 4=4.0 5=5.0 6=5.1 7=6.1 8=7.1.  LFE is always excluded. */
+int pcm_downmix_weights(int ch, double *w)
+{
+    const double F = 0.7071067811865476;
+    static const double t4[] = {0.7071067811865476, 0.7071067811865476, 1.0, 0.5};
+    static const double t5[] = {0.7071067811865476, 0.7071067811865476, 1.0, 0.5, 0.5};
+    static const double t6[] = {0.7071067811865476, 0.7071067811865476, 1.0, 0.0, 0.5, 0.5};
+    static const double t7[] = {0.7071067811865476, 0.7071067811865476, 1.0, 0.0, 0.5, 0.5, 0.5};
+    static const double t8[] = {0.7071067811865476, 0.7071067811865476, 1.0, 0.0,
+                                0.5, 0.5, 0.5, 0.5};
+    const double *src = NULL;
+    if (ch == 1) { w[0] = 1.0; return 1; }
+    if (ch == 2) { w[0] = F; w[1] = F; return 2; }
+    if (ch == 3) { w[0] = F; w[1] = F; w[2] = 0.0; return 3; }
+    if (ch == 4) src = t4;
+    else if (ch == 5) src = t5;
+    else if (ch == 6) src = t6;
+    else if (ch == 7) src = t7;
+    else if (ch == 8) src = t8;
+    if (src) {
+        for (int i = 0; i < ch; i++) w[i] = src[i];
+        return ch;
+    }
+    double e = 1.0 / sqrt((double)ch);          /* rare counts: equal weights */
+    for (int i = 0; i < ch; i++) w[i] = e;
+    return ch;
+}
+
+/* read a WAV natively: 16/24-bit PCM or 32-bit IEEE float, any channel count
+ * (mono downmix uses pcm_downmix_weights). `want` may force a conversion.
+ * An empty result means the caller should fall back to ffmpeg. */
 Pcm pcm_read_wav(const char *path, int want)
 {
     Map m = map_file(path);
@@ -69,45 +99,59 @@ Pcm pcm_read_wav(const char *path, int want)
     int src_s16 = fmt == 1 && bits == 16;
     int src_s24 = fmt == 1 && bits == 24;
     int src_f32 = fmt == 3 && bits == 32;
-    if (ch == 1 && data && dlen && rate > 0 && (src_s16 || src_s24 || src_f32)) {
+    if (ch >= 1 && ch <= 64 && data && dlen && rate > 0 &&
+        (src_s16 || src_s24 || src_f32)) {
         snprintf(p.info.codec, sizeof p.info.codec, "wav");
         p.info.fmt = src_s16 ? SAMPLE_S16 : src_s24 ? SAMPLE_S24 : SAMPLE_F32;
         p.info.bits = bits;
         p.info.channels = ch;
-        size_t n = src_f32 ? dlen / 4 : src_s24 ? dlen / 3 : dlen / 2;
+        size_t bps = src_f32 ? 4 : src_s24 ? 3 : 2;
+        size_t n = dlen / (bps * (size_t)ch);      /* frames */
         int to_f32 = want == SAMPLE_F32 ||
                      (want == SAMPLE_AUTO && (src_f32 || src_s24));
+        double w[64];
+        pcm_downmix_weights(ch, w);
         p.n = n;
         p.rate = rate;
         if (to_f32) {
             p.f = malloc(n * sizeof *p.f);
             if (!p.f) die("out of memory");
             for (size_t i = 0; i < n; i++) {
-                if (src_f32) {
-                    p.f[i] = rd_f32(data + i * 4);
-                } else if (src_s24) {
-                    const unsigned char *b = data + i * 3;
-                    int32_t v = b[0] | (b[1] << 8) | (b[2] << 16);
-                    if (v & 0x800000) v -= 0x1000000;   /* sign extend */
-                    p.f[i] = (float)(v / 8388608.0);   /* 2^23: exact in float32 */
-                } else {
-                    p.f[i] = (float)(rd_s16(data + i * 2) / 32768.0);
+                double acc = 0.0;
+                for (int c = 0; c < ch; c++) {
+                    const unsigned char *q = data + (i * (size_t)ch + c) * bps;
+                    double v;
+                    if (src_f32) v = rd_f32(q);
+                    else if (src_s24) {
+                        int32_t x = q[0] | (q[1] << 8) | (q[2] << 16);
+                        if (x & 0x800000) x -= 0x1000000;
+                        v = x / 8388608.0;
+                    } else {
+                        v = rd_s16(q) / 32768.0;
+                    }
+                    acc += w[c] * v;
                 }
+                p.f[i] = (float)acc;
             }
         } else {
             p.s = malloc(n * 2);
             if (!p.s) die("out of memory");
             for (size_t i = 0; i < n; i++) {
-                if (src_f32) {
-                    p.s[i] = pcm_s16_from_f32(rd_f32(data + i * 4));
-                } else if (src_s24) {
-                    const unsigned char *b = data + i * 3;
-                    int32_t v = b[0] | (b[1] << 8) | (b[2] << 16);
-                    if (v & 0x800000) v -= 0x1000000;
-                    p.s[i] = pcm_s16_from_f32((float)(v / 8388608.0));
-                } else {
-                    memcpy(&p.s[i], data + i * 2, 2);
+                double acc = 0.0;
+                for (int c = 0; c < ch; c++) {
+                    const unsigned char *q = data + (i * (size_t)ch + c) * bps;
+                    double v;
+                    if (src_f32) v = rd_f32(q);
+                    else if (src_s24) {
+                        int32_t x = q[0] | (q[1] << 8) | (q[2] << 16);
+                        if (x & 0x800000) x -= 0x1000000;
+                        v = x / 8388608.0;
+                    } else {
+                        v = rd_s16(q) / 32768.0;
+                    }
+                    acc += w[c] * v;
                 }
+                p.s[i] = pcm_s16_from_f32((float)acc);
             }
         }
     }
